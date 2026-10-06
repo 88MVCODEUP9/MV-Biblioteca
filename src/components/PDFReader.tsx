@@ -51,9 +51,11 @@ const MAX_ZOOM = 4;
  *
  * 165% foi adicionado entre 150% e 175%.
  */
+
 const ZOOM_LEVELS = [
   0.15,  // 15%
   0.2,   // 20%
+  0.25,  // 25%
   0.35,  // 35%
   0.45,  // 45%
   0.5,   // 50%
