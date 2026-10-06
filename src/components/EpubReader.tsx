@@ -1486,8 +1486,29 @@ const ZOOM_LEVELS = [
               </nav>
             </aside>
           )}
+          {/* ============================================================
+              ÁREA RESERVADA PARA DOWNLOAD DO EPUB
+              Espaço livre acima do conteúdo para adicionar um botão depois.
+          ============================================================ */}
+          {!loading && !error && (
+            <div
+              className="
+                relative z-20
+                flex items-center justify-center
+                min-h-[56px]
+                px-4
+                bg-[var(--bg-2)]/80
+                border-t border-b border-[var(--border)]
+                backdrop-blur-xl
+              "
+              aria-label="Área reservada para ações do livro"
+            >
+              {/* BOTÃO DE DOWNLOAD DO EPUB SERÁ ADICIONADO AQUI */}
+            </div>
+          )}
+
         </main>
-  
+
         {/* ================================================================
             FOOTER
         ================================================================= */}
