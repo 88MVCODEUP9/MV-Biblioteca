@@ -36,3 +36,24 @@ if (!hasValidShape) {
 }
 
 console.log('✅ Validação de DEFAULT_COLLECTIONS concluída com sucesso.');
+
+// ── Livros pré-carregados: IDs e links não podem se repetir ─────────────────
+const bookIds = [...source.matchAll(/\{\s*id:\s*"([^"]+)"\s*,\s*title:/g)].map(match => match[1]);
+const bookFiles = [...source.matchAll(/filePath:\s*"([^"]+)"/g)].map(match => match[1]);
+
+const duplicates = list => [...new Set(list.filter((item, index) => list.indexOf(item) !== index))];
+const duplicateIds = duplicates(bookIds);
+const duplicateFiles = duplicates(bookFiles);
+
+if (bookIds.length === 0) {
+  console.error('❌ Nenhum livro pré-carregado encontrado em src/App.tsx.');
+  process.exit(1);
+}
+
+if (duplicateIds.length > 0 || duplicateFiles.length > 0) {
+  if (duplicateIds.length > 0) console.error('❌ IDs de livro repetidos:', duplicateIds.join(', '));
+  if (duplicateFiles.length > 0) console.error('❌ Links de arquivo repetidos:', duplicateFiles.join(', '));
+  process.exit(1);
+}
+
+console.log(`✅ ${bookIds.length} livros pré-carregados, sem IDs nem links repetidos.`);

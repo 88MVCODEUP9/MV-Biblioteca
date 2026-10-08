@@ -70,11 +70,17 @@ export function useBodyScrollLock(active = true) {
   useEffect(() => {
     if (!active) return;
 
+    const root = document.documentElement;
     const previousOverflow = document.body.style.overflow;
+    const previousOverscroll = root.style.overscrollBehavior;
+
     document.body.style.overflow = 'hidden';
+    // Impede que deslizar para os lados vire "voltar página" do navegador.
+    root.style.overscrollBehavior = 'none';
 
     return () => {
       document.body.style.overflow = previousOverflow;
+      root.style.overscrollBehavior = previousOverscroll;
     };
   }, [active]);
 }
@@ -210,17 +216,45 @@ export function useAutoHideControls({
   return { visible, wake, toggle };
 }
 
-/** Dispara o download de um arquivo remoto usando um link temporário. */
-export function triggerDownload(url: string, filename: string) {
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
+/**
+ * Baixa um arquivo remoto.
+ *
+ * O atributo `download` é ignorado pelos navegadores quando o arquivo está em
+ * outro domínio (o livro só abria em outra aba). Por isso tentamos primeiro
+ * baixar os bytes via fetch e salvar como blob; se o servidor não permitir
+ * (CORS), caímos no link direto.
+ */
+export async function triggerDownload(url: string, filename: string) {
+  const safeName = filename.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'livro';
 
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
+  const clickLink = (href: string, external: boolean) => {
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = safeName;
+
+    if (external) {
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+    }
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  try {
+    const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const blobUrl = URL.createObjectURL(await response.blob());
+    clickLink(blobUrl, false);
+    window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  } catch {
+    clickLink(url, true);
+  }
 }
 
 /**
@@ -240,3 +274,208 @@ export function useEntranceTransition(): string {
     ? 'opacity-100 scale-100'
     : 'opacity-0 scale-[0.98]';
 }
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Zoom, viewport e página — compartilhados por PDFReader e EpubReader
+   para que os dois leiam, ampliem e se ajustem à tela exatamente igual.
+────────────────────────────────────────────────────────────────────────── */
+
+export const MIN_ZOOM = 0.15;
+export const MAX_ZOOM = 4;
+export const DEFAULT_ZOOM = 1;
+
+/** Níveis de 15% a 400%, de 5 em 5%. */
+export const ZOOM_LEVELS: number[] = Array.from({ length: 78 }, (_, index) =>
+  Math.round((MIN_ZOOM + index * 0.05) * 100) / 100
+);
+
+/** Tamanho base de uma página A4, em pontos (PDF) / pixels CSS (EPUB). */
+export const PAGE_WIDTH = 595;
+export const PAGE_HEIGHT = 842;
+
+export type ZoomMode = 'fit' | 'manual';
+
+export interface ViewportInfo {
+  width: number;
+  height: number;
+  isMobile: boolean;
+  isTablet: boolean;
+  isDesktop: boolean;
+}
+
+export function useViewport(): ViewportInfo {
+  const read = () => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1280,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800,
+  });
+
+  const [size, setSize] = useState(read);
+
+  useEffect(() => {
+    const handleResize = () => setSize(read());
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
+
+  return {
+    ...size,
+    isMobile: size.width < 640,
+    isTablet: size.width >= 640 && size.width < 1024,
+    isDesktop: size.width >= 1024,
+  };
+}
+
+interface PageZoomOptions {
+  containerRef: React.RefObject<HTMLElement | null>;
+  viewport: ViewportInfo;
+  pageWidth: number;
+  pageHeight: number;
+  rotation: number;
+  /** Só calcula o "ajustar à tela" quando o conteúdo já está pronto. */
+  enabled: boolean;
+}
+
+export interface PageZoom {
+  scale: number;
+  zoomMode: ZoomMode;
+  zoomPercentage: string;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  setManualZoom: (value: number) => void;
+  fitToScreen: () => void;
+}
+
+/**
+ * Lógica de zoom única para PDF e EPUB:
+ * - "ajustar à tela" usa o tamanho REAL da página (não só A4) e respeita rotação;
+ * - celular/tablet priorizam a largura; desktop encaixa a página inteira;
+ * - zoom manual em passos de 5% (15% – 400%).
+ */
+export function usePageZoom({
+  containerRef,
+  viewport,
+  pageWidth,
+  pageHeight,
+  rotation,
+  enabled,
+}: PageZoomOptions): PageZoom {
+  const [scale, setScale] = useState(DEFAULT_ZOOM);
+  const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
+
+  const { isMobile, isTablet } = viewport;
+
+  const calculateFitZoom = useCallback(() => {
+    const container = containerRef.current;
+
+    if (!container) return DEFAULT_ZOOM;
+
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    if (!width || !height) return DEFAULT_ZOOM;
+
+    const swapped = rotation % 180 !== 0;
+    const contentWidth = swapped ? pageHeight : pageWidth;
+    const contentHeight = swapped ? pageWidth : pageHeight;
+
+    // Mesmos respiros do container da página (px / py).
+    const horizontalPadding = isMobile ? 0 : 32;
+    const verticalPadding = isMobile ? 24 : 48;
+
+    const widthScale =
+      Math.max(width - horizontalPadding, 200) / contentWidth;
+    const heightScale =
+      Math.max(height - verticalPadding, 200) / contentHeight;
+
+    const value =
+      isMobile || isTablet
+        ? widthScale
+        : Math.min(widthScale, heightScale);
+
+    return clamp(value, MIN_ZOOM, MAX_ZOOM);
+  }, [containerRef, isMobile, isTablet, pageHeight, pageWidth, rotation]);
+
+  useEffect(() => {
+    if (!enabled || zoomMode !== 'fit') return;
+
+    const timer = window.setTimeout(() => {
+      setScale(calculateFitZoom());
+    }, 100);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    calculateFitZoom,
+    enabled,
+    zoomMode,
+    viewport.width,
+    viewport.height,
+  ]);
+
+  const setManualZoom = useCallback((value: number) => {
+    setZoomMode('manual');
+    setScale(clamp(value, MIN_ZOOM, MAX_ZOOM));
+  }, []);
+
+  const zoomIn = useCallback(() => {
+    setZoomMode('manual');
+    setScale((current) =>
+      ZOOM_LEVELS.find((level) => level > current + 0.001) ?? MAX_ZOOM
+    );
+  }, []);
+
+  const zoomOut = useCallback(() => {
+    setZoomMode('manual');
+    setScale((current) => {
+      for (let index = ZOOM_LEVELS.length - 1; index >= 0; index -= 1) {
+        if (ZOOM_LEVELS[index] < current - 0.001) return ZOOM_LEVELS[index];
+      }
+
+      return MIN_ZOOM;
+    });
+  }, []);
+
+  const fitToScreen = useCallback(() => {
+    setZoomMode('fit');
+    setScale(calculateFitZoom());
+
+    window.requestAnimationFrame(() => {
+      containerRef.current?.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+    });
+  }, [calculateFitZoom, containerRef]);
+
+  return {
+    scale,
+    zoomMode,
+    zoomPercentage: `${Math.round(scale * 100)}%`,
+    zoomIn,
+    zoomOut,
+    setManualZoom,
+    fitToScreen,
+  };
+}
+
+
+/** Classes dos botões da barra do leitor (iguais em PDF e EPUB). */
+export const READER_BUTTON_CLASS = `
+  flex items-center justify-center
+  rounded-xl
+  transition-all duration-200
+  text-[var(--text-sub)]
+  hover:text-[var(--gold)]
+  hover:bg-[var(--gold-glow)]
+  active:scale-95
+  disabled:opacity-30
+  disabled:pointer-events-none
+`;
+
+export const READER_BUTTON_ACTIVE_CLASS = `
+  text-[var(--gold)]
+  bg-[var(--gold-glow)]
+`;

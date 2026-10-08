@@ -1,5 +1,5 @@
 # Leia Livro De Graça: 
-https://88mvcodeup9.github.io/MV_Biblioteca/
+https://88mvcodeup9.github.io/MV-Biblioteca/
 
 # MV_Biblioteca
 
@@ -28,13 +28,21 @@ npm run dev
 npm run build
 ```
 
+## Testes
+
+```bash
+npm run test     # vitest + Testing Library (lógica da biblioteca e fluxos do app)
+npm run lint
+npm run ci       # validate:app + lint + test + build
+```
+
 ## Verificação de segurança da estrutura
 
 ```bash
 npm run validate:app
 ```
 
-Este projeto já conta com validação para impedir que o array de coleções seja contaminado por objetos de livro, evitando que a build quebre ao publicar no GitHub.
+Este projeto já conta com validação para impedir que o array de coleções seja contaminado por objetos de livro e para barrar IDs ou links de livros repetidos, evitando que a build quebre ao publicar no GitHub.
 
 ## Deploy no GitHub Pages
 

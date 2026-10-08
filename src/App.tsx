@@ -1,36 +1,23 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  BookOpen, Library, Search, Plus, Trash2,
-  FolderOpen, ChevronLeft, FileText, Bookmark,
-  Grid3X3, List,
+  Component, Suspense, lazy,
+  useState, useEffect, useCallback, useMemo,
+  type ReactNode,
+} from 'react';
+import {
+  BookOpen, Library, Search,
+  FolderOpen, ChevronLeft, FileText,
+  Grid3X3, List, X, Loader2, AlertTriangle,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { PDFReader } from '@/components/PDFReader';
-import { EpubReader } from '@/components/EpubReader';
+import {
+  bookInCollection, buildCollectionDefinitions, canonicalKey, isValidBook,
+  normalizeUrl, sameCollectionId, sortBooks,
+  type Book, type Collection, type FileType, type FormatFilter, type SortMode,
+} from '@/lib/library';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type FileType = 'pdf' | 'epub';
-
-interface Collection {
-  id: string;
-  name: string;
-  parentId?: string;
-}
-
-interface Book {
-  id: string;
-  title: string;
-  author: string;
-  fileType: FileType;
-  filePath: string;
-  coverPath?: string;
-  collectionId?: string;
-  subCollectionId?: string;
-  addedDate: string;
-}
+// Os leitores (pdf.js, epub.js) são pesados: só são baixados quando alguém abre um livro.
+const PDFReader = lazy(() => import('@/components/PDFReader').then(m => ({ default: m.PDFReader })));
+const EpubReader = lazy(() => import('@/components/EpubReader').then(m => ({ default: m.EpubReader })));
 
 const DEFAULT_COLLECTIONS: Collection[] = [
   { id: 'Marvel', name: 'Marvel' },
@@ -40,61 +27,7 @@ const DEFAULT_COLLECTIONS: Collection[] = [
   { id: 'Crepúsculo', name: 'Crepúsculo' },
 ];
 
-const LEGACY_AUTOMATIC_SUBCOLLECTIONS = new Set(['Invasão Secreta (2008)']);
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function canonicalKey(value: string): string {
-  return value
-    .trim()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLocaleLowerCase('pt-BR');
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
-
-function detectFileType(url: string): FileType | null {
-  if (!isHttpUrl(url)) return null;
-  try {
-    const pathname = decodeURIComponent(new URL(url).pathname).toLocaleLowerCase('pt-BR');
-    if (pathname.endsWith('.epub')) return 'epub';
-    if (pathname.endsWith('.pdf')) return 'pdf';
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function sameCollectionId(first?: string, second?: string) {
-  if (!first || !second) return false;
-  return canonicalKey(first) === canonicalKey(second);
-}
-
-function isValidBook(value: unknown): value is Book {
-  if (!value || typeof value !== 'object') return false;
-  const book = value as Partial<Book>;
-  return typeof book.id === 'string' &&
-    typeof book.title === 'string' && book.title.trim().length > 0 &&
-    typeof book.author === 'string' && book.author.trim().length > 0 &&
-    (book.fileType === 'pdf' || book.fileType === 'epub') &&
-    typeof book.filePath === 'string' && isHttpUrl(book.filePath) &&
-    typeof book.addedDate === 'string';
-}
-
-function createUserId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `u_${crypto.randomUUID()}`;
-  }
-  return `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-}
 
 function fileTypeIcon(ft: FileType) {
   if (ft === 'epub') return <BookOpen className="w-4 h-4" />;
@@ -103,14 +36,14 @@ function fileTypeIcon(ft: FileType) {
 
 function fileTypeBadgeColor(ft: FileType) {
   if (ft === 'epub') return 'text-emerald-400 bg-emerald-400/10 border-emerald-400/20';
-  return 'text-[var(--gold-dim)] bg-[var(--gold-glow2)] border-[rgba(201,171,110,0.15)]';
+  return 'text-[var(--gold-dim)] bg-[var(--gold-glow-2)] border-[rgba(201,171,110,0.15)]';
 }
 
 // ─── Preloaded books ──────────────────────────────────────────────────────────
 // To add new books: copy one of the objects below and fill in the fields.
 // fileType: "pdf" | "epub"
 
-const PRELOADED_BOOKS: Book[] = [
+const RAW_PRELOADED_BOOKS: Book[] = [
 
   // ── Crepúsculo ────────────────────────────────────────────────────────
   { id:"01", title:"A Breve Segunda Vida", author:"Stephenie Meyer", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Stephenie%20Meyer/PDF/A%20breve%20segunda%20vida.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Stephenie%20Meyer/CAPA/A%20Breve%20Segunda%20Vida.png", collectionId:"Crepúsculo", addedDate:"2026-03-25T00:00:00.000Z" },
@@ -470,12 +403,12 @@ const PRELOADED_BOOKS: Book[] = [
   { id:"294", title:"A Invasão de Tearling", author:"Erika Johansen", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/A%20Rainha%20de%20Tearling/02%20-%20A%20Invas%C3%A3o%20de%20Tearling%20-%20Erika%20Johansen.epub", coverPath:"https://mvin2006.github.io/LIVROS/A%20Rainha%20de%20Tearling/02%20-%20A%20Invas%C3%A3o%20de%20Tearling%20-%20Erika%20Johansen.webp", collectionId:"A Rainha de Tearling", addedDate:"2026-09-15T00:00:00.000Z" },
   { id:"295", title:"O Destino de Tearling", author:"Erika Johansen", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/A%20Rainha%20de%20Tearling/03%20-%20O%20Destino%20de%20Tearling%20-%20Erika%20Johansen.epub", coverPath:"https://mvin2006.github.io/LIVROS/A%20Rainha%20de%20Tearling/03%20-%20O%20Destino%20de%20Tearling%20-%20Erika%20Johansen.webp", collectionId:"A Rainha de Tearling", addedDate:"2026-09-15T00:00:00.000Z" },
   { id:"296", title:"A Cruzada Secreta", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/A%20Cruzada%20Secreta.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/A%20Cruzada%20Secreta.webp", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
-  { id:"297", title:"Bandeira Negra", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Bandeira%20negra.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Bandeira%20negra.webp", collectionId:"Assassin", addedDate:"2026-09-17T00:00:00.000Z" },
-  { id:"298", title:"Guia Definitivo", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Guia%20Definitivo.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Guia%20Definitivo.webp", collectionId:"Assassin", addedDate:"2026-09-17T00:00:00.000Z" },
-  { id:"299", title:"Irmandade", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Irmandade.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Irmandade.webp", collectionId:"Assassin", addedDate:"2026-09-17T00:00:00.000Z" },
-  { id:"300", title:"Renascença", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renascen%C3%A7a.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renascen%C3%A7a.webp", collectionId:"Assassin", addedDate:"2026-09-17T00:00:00.000Z" },
-  { id:"301", title:"Renegado", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renegado.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renegado.webp", collectionId:"Assassin", addedDate:"2026-09-17T00:00:00.000Z" },
-  { id:"302", title:"Submundo", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Submundo.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Submundo.webp", collectionId:"Assassin", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"297", title:"Bandeira Negra", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Bandeira%20negra.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Bandeira%20negra.webp", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"298", title:"Guia Definitivo", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Guia%20Definitivo.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Guia%20Definitivo.webp", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"299", title:"Irmandade", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Irmandade.pdf", coverPath:"https://github.com/Mvin2006/LIVROS/blob/main/Assassin's%20creed/Irmandade.webp?raw=true", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"300", title:"Renascença", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renascen%C3%A7a.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renascen%C3%A7a.webp", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"301", title:"Renegado", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renegado.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Renegado.webp", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"302", title:"Submundo", author:"Oliver Bowden", fileType:"pdf", filePath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Submundo.pdf", coverPath:"https://mvin2006.github.io/LIVROS/Assassin's%20creed/Submundo.webp", collectionId:"Assassin's creed", addedDate:"2026-09-17T00:00:00.000Z" },
   { id:"303", title:"Sombra e Ossos", author:"Leigh Bardugo", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/Trilogia%20Grisha/01%20-%20Sombra%20e%20Ossos.epub", coverPath:"https://mvin2006.github.io/LIVROS/Trilogia%20Grisha/01%20-%20Sombra%20e%20Ossos.webp", collectionId:"Trilogia Grisha", addedDate:"2026-09-17T00:00:00.000Z" },
   { id:"304", title:"Sol e Tormenta", author:"Leigh Bardugo", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/Trilogia%20Grisha/02%20-%20Sol%20e%20Tormenta.epub", coverPath:"https://mvin2006.github.io/LIVROS/Trilogia%20Grisha/02%20-%20Sol%20e%20Tormenta.webp", collectionId:"Trilogia Grisha", addedDate:"2026-09-17T00:00:00.000Z" },
   { id:"305", title:"Ruína e Ascensão", author:"Leigh Bardugo", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/Trilogia%20Grisha/03%20-%20%20Ru%C3%ADna%20e%20Ascens%C3%A3o.epub", coverPath:"https://mvin2006.github.io/LIVROS/Trilogia%20Grisha/03%20-%20%20Ru%C3%ADna%20e%20Ascens%C3%A3o.webp", collectionId:"Trilogia Grisha", addedDate:"2026-09-17T00:00:00.000Z" },
@@ -498,293 +431,185 @@ const PRELOADED_BOOKS: Book[] = [
 
 ];
 
+// Corrige links do GitHub (blob → raw) e codifica espaços/acentos nas URLs.
+const PRELOADED_BOOKS: Book[] = RAW_PRELOADED_BOOKS.map(book => ({
+  ...book,
+  filePath: normalizeUrl(book.filePath),
+  coverPath: book.coverPath ? normalizeUrl(book.coverPath) : undefined,
+}));
 
 const STORAGE_KEY = 'estante_books_v2';
-const COLLECTIONS_STORAGE_KEY = 'estante_collections_v1';
 const HIDDEN_PRELOADED_STORAGE_KEY = 'estante_hidden_preloaded_v1';
+const RECENT_STORAGE_KEY = 'estante_recent_v1';
+const MAX_RECENT = 8;
 
 const NAV_ITEMS = [
   { id: 'books', label: 'Livros', Icon: BookOpen },
   { id: 'collections', label: 'Coleções', Icon: FolderOpen },
 ] as const;
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-const Toast = ({ message, show }: { message: string; show: boolean }) => (
-  <div className={`toast ${show ? 'show' : ''}`} role="status" aria-live="polite" aria-atomic="true">{message}</div>
-);
+// ─── Storage / derived data ───────────────────────────────────────────────────
 
-// ─── Add Book Form ─────────────────────────────────────────────────────────────
+function readStoredJson(key: string): unknown {
+  if (typeof window === 'undefined') return null;
 
-interface AddFormProps {
-  onAdd: (book: Omit<Book, 'id' | 'addedDate'>) => void;
-  collections: Collection[];
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
 }
 
-function AddBookForm({ onAdd, collections }: AddFormProps) {
-  const [title,      setTitle]      = useState('');
-  const [author,     setAuthor]     = useState('');
-  const [fileUrl,    setFileUrl]    = useState('');
-  const [cover,      setCover]      = useState('');
-  const [collection, setCollection] = useState('');
-  const [subCollection, setSubCollection] = useState('');
-  const [detectedType, setDetectedType] = useState<FileType | null>(null);
-  const [formError, setFormError] = useState('');
+function loadInitialBooks(): Book[] {
+  const parsedBooks = readStoredJson(STORAGE_KEY);
+  const userBooks = Array.isArray(parsedBooks) ? parsedBooks.filter(isValidBook) : [];
+  const preloadedIds = new Set(PRELOADED_BOOKS.map(book => book.id));
+  const extras = userBooks.filter(book => !preloadedIds.has(book.id));
 
-  const onUrlChange = (v: string) => {
-    setFileUrl(v);
-    setDetectedType(detectFileType(v));
-    if (formError) setFormError('');
-  };
+  const hiddenRaw = readStoredJson(HIDDEN_PRELOADED_STORAGE_KEY);
+  const hidden = new Set(
+    Array.isArray(hiddenRaw) ? hiddenRaw.filter((id): id is string => typeof id === 'string') : []
+  );
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !author.trim() || !fileUrl.trim()) return;
-    if (!isHttpUrl(fileUrl.trim())) {
-      setFormError('Informe uma URL HTTP/HTTPS válida para o arquivo.');
-      return;
-    }
-    if (!detectedType) {
-      setFormError('O arquivo precisa terminar em .pdf ou .epub.');
-      return;
-    }
-    if (cover.trim() && !isHttpUrl(cover.trim())) {
-      setFormError('O link da capa precisa ser uma URL HTTP/HTTPS válida.');
-      return;
-    }
-    onAdd({
-      title:        title.trim(),
-      author:       author.trim(),
-      fileType:     detectedType,
-      filePath:     fileUrl.trim(),
-      coverPath:    cover.trim() || undefined,
-      collectionId: collection || undefined,
-      subCollectionId: subCollection || undefined,
-    });
-    setTitle(''); setAuthor(''); setFileUrl('');
-    setCover(''); setCollection(''); setSubCollection(''); setDetectedType(null); setFormError('');
-  };
+  return [...PRELOADED_BOOKS.filter(book => !hidden.has(book.id)), ...extras];
+}
 
-  const inputClass = 'bg-[var(--bg-4)] border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-[var(--gold-dim)] transition-colors';
-  const labelClass = 'block text-[11px] uppercase tracking-wider text-[var(--text-muted)] mb-1.5 font-medium';
+function loadRecentIds(): string[] {
+  const raw = readStoredJson(RECENT_STORAGE_KEY);
+  return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string').slice(0, MAX_RECENT) : [];
+}
+
+function saveRecentIds(ids: string[]) {
+  try {
+    window.localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    /* armazenamento cheio ou bloqueado — o histórico é opcional */
+  }
+}
+
+// ─── Small components ─────────────────────────────────────────────────────────
+
+/** Capa com plano B: se a imagem falhar, mostra o título em vez de um buraco preto. */
+function BookCover({ book, priority }: { book: Book; priority: boolean }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!book.coverPath || failed) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-2 text-center text-[var(--text-muted)] bg-gradient-to-b from-[var(--bg-4)] to-[var(--bg-3)]">
+        {fileTypeIcon(book.fileType)}
+        <span className="font-serif text-[11px] leading-tight line-clamp-4 text-[var(--text-sub)]">{book.title}</span>
+      </div>
+    );
+  }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="book-title" className={labelClass}>Título *</label>
-          <Input id="book-title" value={title} onChange={e => setTitle(e.target.value)} placeholder="Nome do livro" className={inputClass} required />
-        </div>
-        <div>
-          <label htmlFor="book-author" className={labelClass}>Autor *</label>
-          <Input id="book-author" value={author} onChange={e => setAuthor(e.target.value)} placeholder="Nome do autor" className={inputClass} required />
-        </div>
-      </div>
-
-      <div>
-        <label htmlFor="book-file-url" className={labelClass}>
-          Link do arquivo *
-          {detectedType && (
-            <span className={`ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold border ${fileTypeBadgeColor(detectedType)}`}>
-              {fileTypeIcon(detectedType)}
-              {detectedType.toUpperCase()} detectado
-            </span>
-          )}
-        </label>
-        <Input
-          id="book-file-url"
-          type="url"
-          inputMode="url"
-          value={fileUrl}
-          onChange={e => onUrlChange(e.target.value)}
-          placeholder="https://.../arquivo.pdf ou .epub"
-          className={inputClass}
-          required
-        />
-        <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-          Suporta <strong className="text-[var(--text-sub)]">PDF</strong> e <strong className="text-[var(--text-sub)]">EPUB</strong>. O tipo é detectado automaticamente pela extensão.
-        </p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label htmlFor="book-cover-url" className={labelClass}>Link da capa <span className="normal-case text-[var(--text-muted)] font-normal">(opcional)</span></label>
-          <Input id="book-cover-url" type="url" inputMode="url" value={cover} onChange={e => setCover(e.target.value)} placeholder="https://.../capa.jpg" className={inputClass} />
-        </div>
-        <div>
-          <label htmlFor="book-collection" className={labelClass}>Coleção / Série</label>
-          <select id="book-collection" value={collection} onChange={e => { setCollection(e.target.value); setSubCollection(''); }} className={`w-full h-9 rounded-md border px-3 text-sm ${inputClass}`}>
-            <option value="">Sem Coleção</option>
-            {collections.filter(item => !item.parentId).map(item => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label htmlFor="book-subcollection" className={labelClass}>Subcoleção <span className="normal-case text-[var(--text-muted)] font-normal">(opcional)</span></label>
-          <select id="book-subcollection" value={subCollection} onChange={e => setSubCollection(e.target.value)} disabled={!collection} className={`w-full h-9 rounded-md border px-3 text-sm ${inputClass} disabled:opacity-50`}>
-            <option value="">Sem Subcoleção</option>
-            {collections.filter(item => item.parentId === collection).map(item => (
-              <option key={item.id} value={item.id}>{item.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {formError && <p className="text-sm text-red-400" role="alert">{formError}</p>}
-
-      <Button type="submit" disabled={!detectedType} className="w-full bg-[var(--gold)] text-[var(--bg)] hover:bg-[#d6bc80] font-semibold h-11 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-        <Plus className="w-4 h-4 mr-2" />
-        Adicionar à Biblioteca
-      </Button>
-    </form>
+    <img
+      src={book.coverPath}
+      alt={book.title}
+      className="w-full h-full object-cover"
+      loading={priority ? 'eager' : 'lazy'}
+      fetchPriority={priority ? 'high' : 'low'}
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
-interface AddCollectionFormProps {
-  collections: Collection[];
-  onAdd: (name: string, parentId?: string) => void;
-}
+/** Evita que um erro dentro do leitor derrube o app inteiro. */
+class ReaderBoundary extends Component<
+  { onClose: () => void; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
 
-function AddCollectionForm({ collections, onAdd }: AddCollectionFormProps) {
-  const [name, setName] = useState('');
-  const [parentId, setParentId] = useState('');
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
 
-  const handleSubmit = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!name.trim()) return;
-    onAdd(name, parentId || undefined);
-    setName('');
-  };
-
-  const inputClass = 'bg-[var(--bg-4)] border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] focus:border-[var(--gold-dim)] transition-colors';
-
-  return (
-    <form onSubmit={handleSubmit} className="mb-6 p-4 bg-[var(--bg-3)] border border-[var(--border)] rounded-xl">
-      <p className="text-xs text-[var(--text-muted)] mb-3 uppercase tracking-wider font-medium">Nova coleção</p>
-      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3">
-        <Input value={name} onChange={event => setName(event.target.value)} placeholder="Nome da coleção" className={inputClass} required />
-        <select value={parentId} onChange={event => setParentId(event.target.value)} className={`h-9 rounded-md border px-3 text-sm ${inputClass}`}>
-          <option value="">Coleção principal</option>
-          {collections.filter(collection => !collection.parentId).map(collection => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-        </select>
-        <Button type="submit" className="bg-[var(--gold)] text-[var(--bg)] hover:bg-[#d6bc80] font-semibold">
-          <Plus className="w-4 h-4 mr-2" />Adicionar
-        </Button>
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div role="alert" className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-[var(--bg)] p-6 text-center">
+        <AlertTriangle className="w-10 h-10 text-[var(--gold)]" />
+        <h2 className="font-serif text-xl text-[var(--text)]">Não foi possível abrir este livro</h2>
+        <p className="max-w-sm text-sm text-[var(--text-sub)]">Ocorreu um erro no leitor. Volte à estante e tente abrir o livro de novo.</p>
+        <button type="button" onClick={this.props.onClose} className="px-5 py-2 rounded-full bg-[var(--gold)] text-[var(--bg)] text-sm font-semibold">
+          Voltar à estante
+        </button>
       </div>
-    </form>
-  );
+    );
+  }
 }
+
+const FORMAT_FILTERS: { id: FormatFilter; label: string }[] = [
+  { id: 'all', label: 'Todos' },
+  { id: 'pdf', label: 'PDF' },
+  { id: 'epub', label: 'EPUB' },
+];
+
+const SORT_OPTIONS: { id: SortMode; label: string }[] = [
+  { id: 'default', label: 'Ordem da estante' },
+  { id: 'title', label: 'Título (A–Z)' },
+  { id: 'recent', label: 'Mais recentes' },
+];
+
+// Marca que o popstate em andamento foi disparado pelo próprio app.
+let selfInitiatedBack = false;
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
-  const [hiddenPreloadedIds, setHiddenPreloadedIds] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [];
-    try {
-      const parsed = JSON.parse(localStorage.getItem(HIDDEN_PRELOADED_STORAGE_KEY) || '[]');
-      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [];
-    } catch {
-      return [];
-    }
-  });
-
-  const [books, setBooks] = useState<Book[]>(() => {
-    if (typeof window === 'undefined') return PRELOADED_BOOKS;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const parsed: unknown = saved ? JSON.parse(saved) : [];
-      const userBooks = Array.isArray(parsed) ? parsed.filter(isValidBook) : [];
-      const preloadedIds = new Set(PRELOADED_BOOKS.map(b => b.id));
-      const extras = userBooks.filter(b => !preloadedIds.has(b.id));
-      const hiddenRaw = JSON.parse(localStorage.getItem(HIDDEN_PRELOADED_STORAGE_KEY) || '[]');
-      const hidden = new Set(Array.isArray(hiddenRaw) ? hiddenRaw.filter((id): id is string => typeof id === 'string') : []);
-      return [...PRELOADED_BOOKS.filter(book => !hidden.has(book.id)), ...extras];
-    } catch {
-      return PRELOADED_BOOKS;
-    }
-  });
-
-  const [collectionDefinitions, setCollectionDefinitions] = useState<Collection[]>(() => {
-    if (typeof window === 'undefined') return DEFAULT_COLLECTIONS;
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const parsedBooks: unknown = saved ? JSON.parse(saved) : [];
-      const userBooks = Array.isArray(parsedBooks) ? parsedBooks.filter(isValidBook) : [];
-      const parsedCollections: unknown = JSON.parse(localStorage.getItem(COLLECTIONS_STORAGE_KEY) || '[]');
-      const savedCollections: Collection[] = Array.isArray(parsedCollections)
-        ? parsedCollections.filter((item): item is Collection => Boolean(item) && typeof item === 'object' && typeof (item as Collection).id === 'string' && typeof (item as Collection).name === 'string')
-        : [];
-      const bookCollections = [...PRELOADED_BOOKS, ...userBooks].flatMap(book => {
-        const definitions: Collection[] = [];
-        if (book.collectionId) definitions.push({ id: book.collectionId, name: book.collectionId });
-        if (book.subCollectionId) {
-          definitions.push({ id: book.subCollectionId, name: book.subCollectionId, parentId: book.collectionId });
-        }
-        return definitions;
-      });
-      const bookIds = new Set([...PRELOADED_BOOKS, ...userBooks].flatMap(book => [book.collectionId, book.subCollectionId].filter(Boolean)));
-      return [...DEFAULT_COLLECTIONS, ...savedCollections.filter(collection =>
-        !LEGACY_AUTOMATIC_SUBCOLLECTIONS.has(collection.id) || bookIds.has(collection.id)
-      ), ...bookCollections].filter((collection, index, all) => all.findIndex(item => sameCollectionId(item.id, collection.id)) === index);
-    } catch {
-      return DEFAULT_COLLECTIONS;
-    }
-  });
+  const [books] = useState<Book[]>(loadInitialBooks);
+  const collectionDefinitions = useMemo(() => buildCollectionDefinitions(books, DEFAULT_COLLECTIONS), [books]);
 
   const [activeTab,          setActiveTab]          = useState<'books' | 'collections'>('books');
   const [searchQuery,        setSearchQuery]        = useState('');
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
-  const [, setNavigationHistory] = useState<Array<{
+  const [navigationHistory, setNavigationHistory] = useState<Array<{
     activeTab: 'books' | 'collections';
     selectedCollection: string | null;
   }>>([]);
   const [readingBook,        setReadingBook]        = useState<Book | null>(null);
-  const [toast,              setToast]              = useState({ message: '', show: false });
+  const [sortMode,          setSortMode]           = useState<SortMode>('default');
+  const [formatFilter,      setFormatFilter]       = useState<FormatFilter>('all');
+  const [recentIds,         setRecentIds]          = useState<string[]>(loadRecentIds);
+  const isReading = readingBook !== null;
+
+  // Botão/gesto "voltar" do navegador fecha só o leitor (e não o site inteiro).
+  // O popstate gerado pelo nosso próprio history.back() (ao fechar pelo botão
+  // do leitor) é ignorado — senão, no StrictMode, o leitor fechava sozinho.
+  useEffect(() => {
+    if (!isReading) return;
+
+    window.history.pushState({ mvReader: true }, '');
+
+    const handlePopState = () => {
+      if (selfInitiatedBack) return;
+      setReadingBook(null);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+
+      if ((window.history.state as { mvReader?: boolean } | null)?.mvReader) {
+        window.addEventListener('popstate', () => {
+          selfInitiatedBack = true;
+          window.setTimeout(() => { selfInitiatedBack = false; }, 0);
+        }, { once: true });
+        window.history.back();
+      }
+    };
+  }, [isReading]);
   const [viewMode,           setViewMode]           = useState<'grid' | 'list'>('grid');
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // ── Persist user-added books ───────────────────────────────────────────────
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const userBooks = books.filter(b => b.id.startsWith('u_'));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(userBooks));
-  }, [books]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(HIDDEN_PRELOADED_STORAGE_KEY, JSON.stringify(hiddenPreloadedIds));
-  }, [hiddenPreloadedIds]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    localStorage.setItem(COLLECTIONS_STORAGE_KEY, JSON.stringify(collectionDefinitions));
-  }, [collectionDefinitions]);
-
-  // ── Toast helper ───────────────────────────────────────────────────────────
-  const showToast = useCallback((message: string) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setToast({ message, show: true });
-    toastTimerRef.current = setTimeout(() => {
-      setToast({ message: '', show: false });
-      toastTimerRef.current = null;
-    }, 2800);
-  }, []);
-
-  useEffect(() => () => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-  }, []);
 
   // ── Collections ────────────────────────────────────────────────────────────
   const collections = useMemo(() => {
     return collectionDefinitions.map(collection => {
       const childIds = collectionDefinitions.filter(item => sameCollectionId(item.parentId, collection.id)).map(item => item.id);
-      const collectionBooks = books.filter(book =>
-        sameCollectionId(book.collectionId, collection.id) ||
-        sameCollectionId(book.subCollectionId, collection.id) ||
-        childIds.some(childId => sameCollectionId(childId, book.subCollectionId) || sameCollectionId(childId, book.collectionId))
-      );
+      const collectionBooks = books.filter(book => bookInCollection(book, collection.id, childIds));
       return {
         ...collection,
         count: collectionBooks.length,
@@ -797,42 +622,43 @@ function App() {
   // ── Filter ─────────────────────────────────────────────────────────────────
   const filteredBooks = useMemo(() => {
     const q = canonicalKey(searchQuery);
-    return books.filter(book => {
+    const childIds = selectedCollection
+      ? collectionDefinitions.filter(item => sameCollectionId(item.parentId, selectedCollection)).map(item => item.id)
+      : [];
+
+    const matches = books.filter(book => {
       const matchSearch = !q ||
         canonicalKey(book.title).includes(q) ||
         canonicalKey(book.author).includes(q);
-      const childIds = collectionDefinitions.filter(item => sameCollectionId(item.parentId, selectedCollection || undefined)).map(item => item.id);
-      const matchCol = !selectedCollection || sameCollectionId(book.collectionId, selectedCollection) || sameCollectionId(book.subCollectionId, selectedCollection) || childIds.some(childId => sameCollectionId(childId, book.collectionId) || sameCollectionId(childId, book.subCollectionId));
-      return matchSearch && matchCol;
+      const matchCol = !selectedCollection || bookInCollection(book, selectedCollection, childIds);
+      const matchFormat = formatFilter === 'all' || book.fileType === formatFilter;
+      return matchSearch && matchCol && matchFormat;
     });
-  }, [books, collectionDefinitions, searchQuery, selectedCollection]);
 
-  // ── CRUD ───────────────────────────────────────────────────────────────────
-  const addBook = useCallback((data: Omit<Book, 'id' | 'addedDate'>) => {
-    setBooks(prev => [...prev, { ...data, id: createUserId(), addedDate: new Date().toISOString() }]);
-    if (data.collectionId && !collectionDefinitions.some(collection => sameCollectionId(collection.id, data.collectionId))) {
-      setCollectionDefinitions(prev => [...prev, { id: data.collectionId!, name: data.collectionId! }]);
-    }
-    showToast('✓ Livro adicionado com sucesso!');
-  }, [collectionDefinitions, showToast]);
+    return sortBooks(matches, sortMode);
+  }, [books, collectionDefinitions, searchQuery, selectedCollection, formatFilter, sortMode]);
 
-  const addCollection = useCallback((name: string, parentId?: string) => {
-    const normalizedName = name.trim();
-    if (!normalizedName || collectionDefinitions.some(collection => sameCollectionId(collection.id, normalizedName))) {
-      showToast('Essa coleção já existe.');
-      return;
-    }
-    setCollectionDefinitions(prev => [...prev, { id: normalizedName, name: normalizedName, parentId }]);
-    showToast('✓ Coleção adicionada com sucesso!');
-  }, [collectionDefinitions, showToast]);
+  const recentBooks = useMemo(
+    () => recentIds.map(id => books.find(book => book.id === id)).filter((book): book is Book => Boolean(book)),
+    [recentIds, books],
+  );
 
-  const removeBook = useCallback((id: string) => {
-    if (PRELOADED_BOOKS.some(book => book.id === id)) {
-      setHiddenPreloadedIds(prev => prev.includes(id) ? prev : [...prev, id]);
-    }
-    setBooks(prev => prev.filter(b => b.id !== id));
-    showToast('✓ Livro removido');
-  }, [showToast]);
+  const openBook = useCallback((book: Book) => {
+    setReadingBook(book);
+    setRecentIds(prev => {
+      const next = [book.id, ...prev.filter(id => id !== book.id)].slice(0, MAX_RECENT);
+      saveRecentIds(next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    document.title = readingBook
+      ? `${readingBook.title} — Minha Estante`
+      : selectedCollection
+        ? `${selectedCollection} — Minha Estante`
+        : 'Minha Estante — Biblioteca Digital';
+  }, [readingBook, selectedCollection]);
 
   const selectCollection = useCallback((id: string) => {
     setNavigationHistory(prev => [...prev, { activeTab, selectedCollection }]);
@@ -842,34 +668,42 @@ function App() {
 
   // Retorna exatamente para a tela anterior, preservando aba e coleção.
   const goBack = useCallback(() => {
-    setNavigationHistory(prev => {
-      if (prev.length === 0) {
-        setSelectedCollection(null);
-        setActiveTab('collections');
-        return prev;
-      }
-      const previous = prev[prev.length - 1];
-      setSelectedCollection(previous.selectedCollection);
-      setActiveTab(previous.activeTab);
-      return prev.slice(0, -1);
-    });
-  }, []);
+    const previous = navigationHistory[navigationHistory.length - 1];
+
+    if (!previous) {
+      setSelectedCollection(null);
+      setActiveTab('collections');
+      return;
+    }
+
+    setSelectedCollection(previous.selectedCollection);
+    setActiveTab(previous.activeTab);
+    setNavigationHistory(navigationHistory.slice(0, -1));
+  }, [navigationHistory]);
 
   // ── Reader renderer ────────────────────────────────────────────────────────
   const renderReader = () => {
     if (!readingBook) return null;
     const close = () => setReadingBook(null);
-    if (readingBook.fileType === 'epub') {
-      return <EpubReader url={readingBook.filePath} title={readingBook.title} author={readingBook.author} coverUrl={readingBook.coverPath} onClose={close} />;
-    }
+    const Reader = readingBook.fileType === 'epub' ? EpubReader : PDFReader;
     return (
-      <PDFReader
-        url={readingBook.filePath}
-        title={readingBook.title}
-        author={readingBook.author}
-        coverUrl={readingBook.coverPath}
-        onClose={close}
-      />
+      <ReaderBoundary key={readingBook.id} onClose={close}>
+        <Suspense
+          fallback={
+            <div role="status" aria-label="Carregando leitor" className="fixed inset-0 z-[100] flex items-center justify-center bg-[var(--bg)]">
+              <Loader2 className="w-8 h-8 animate-spin text-[var(--gold)]" />
+            </div>
+          }
+        >
+          <Reader
+            url={readingBook.filePath}
+            title={readingBook.title}
+            author={readingBook.author}
+            coverUrl={readingBook.coverPath}
+            onClose={close}
+          />
+        </Suspense>
+      </ReaderBoundary>
     );
   };
 
@@ -879,26 +713,11 @@ function App() {
       key={book.id}
       className="book-card animate-cardIn text-left"
       style={{ animationDelay: `${Math.min(index * 0.03, 0.5)}s` }}
-      onClick={() => setReadingBook(book)}
+      onClick={() => openBook(book)}
       aria-label={`Ler ${book.title}`}
     >
       <div className="relative w-full aspect-[2/3] overflow-hidden bg-[var(--bg-4)]">
-        {book.coverPath ? (
-          <img
-            src={book.coverPath}
-            alt={book.title}
-            className="w-full h-full object-cover"
-            loading={index < 6 ? 'eager' : 'lazy'}
-            fetchPriority={index < 6 ? 'high' : 'low'}
-            decoding="async"
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-          />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
-            {fileTypeIcon(book.fileType)}
-            <span className="text-[10px] uppercase tracking-widest">{book.fileType}</span>
-          </div>
-        )}
+        <BookCover book={book} priority={index < 6} />
         <div className="cover-overlay">
           <span className="px-3 py-1.5 bg-[var(--gold)] text-[var(--bg)] text-[10px] font-semibold uppercase tracking-wider rounded-full">
             Ler agora
@@ -913,7 +732,7 @@ function App() {
         <h3 className="font-serif font-semibold text-[13px] text-[var(--text)] line-clamp-2 leading-tight">{book.title}</h3>
         <p className="text-[10px] text-[var(--text-muted)] mt-0.5 truncate">{book.author}</p>
         {(book.collectionId || book.subCollectionId) && (
-          <span className="inline-block mt-1.5 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-[var(--gold-dim)] bg-[var(--gold-glow2)] border border-[rgba(201,171,110,0.15)] rounded">
+          <span className="inline-block mt-1.5 px-1.5 py-0.5 text-[8px] uppercase tracking-wider text-[var(--gold-dim)] bg-[var(--gold-glow-2)] border border-[rgba(201,171,110,0.15)] rounded">
             {book.subCollectionId || book.collectionId}
           </span>
         )}
@@ -927,20 +746,17 @@ function App() {
       key={book.id}
       className="w-full flex items-center gap-4 p-3 bg-[var(--bg-3)] border border-[var(--border)] rounded-xl hover:border-[var(--border-2)] transition-all animate-cardIn text-left group"
       style={{ animationDelay: `${Math.min(index * 0.02, 0.4)}s` }}
-      onClick={() => setReadingBook(book)}
+      onClick={() => openBook(book)}
       aria-label={`Ler ${book.title}`}
     >
       <div className="relative flex-shrink-0 w-12 h-16 rounded overflow-hidden bg-[var(--bg-4)]">
-        {book.coverPath
-          ? <img src={book.coverPath} alt="" className="w-full h-full object-cover" loading={index < 6 ? 'eager' : 'lazy'} fetchPriority={index < 6 ? 'high' : 'low'} decoding="async" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-          : <div className="flex items-center justify-center w-full h-full text-[var(--text-muted)]">{fileTypeIcon(book.fileType)}</div>
-        }
+        <BookCover book={book} priority={index < 6} />
       </div>
       <div className="flex-1 min-w-0">
         <p className="font-serif font-semibold text-[var(--text)] text-sm truncate group-hover:text-[var(--gold)] transition-colors">{book.title}</p>
         <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{book.author}</p>
         {(book.collectionId || book.subCollectionId) && (
-          <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[var(--gold-dim)] bg-[var(--gold-glow2)] border border-[rgba(201,171,110,0.15)] rounded">
+          <span className="inline-block mt-1 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-[var(--gold-dim)] bg-[var(--gold-glow-2)] border border-[rgba(201,171,110,0.15)] rounded">
             {book.subCollectionId || book.collectionId}
           </span>
         )}
@@ -952,40 +768,6 @@ function App() {
         Ler →
       </span>
     </button>
-  );
-
-  // ── Mini item (config list) ────────────────────────────────────────────────
-  const renderMiniItem = (book: Book) => (
-    <li
-      key={book.id}
-      className="flex items-center gap-3 p-3 bg-[var(--bg-4)] border border-[var(--border)] rounded-lg hover:border-[var(--border-2)] transition-colors"
-    >
-      <div className="flex-shrink-0 w-9 h-12 rounded overflow-hidden bg-[var(--bg-3)]">
-        {book.coverPath
-          ? <img src={book.coverPath} alt="" className="w-full h-full object-cover" loading="lazy" />
-          : <div className="flex items-center justify-center w-full h-full text-[var(--text-muted)]">{fileTypeIcon(book.fileType)}</div>
-        }
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-[13px] text-[var(--text)] truncate">{book.title}</p>
-        <p className="text-[11px] text-[var(--text-muted)]">{book.author}</p>
-      </div>
-      <span className={`hidden sm:inline-flex text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${fileTypeBadgeColor(book.fileType)}`}>
-        {book.fileType}
-      </span>
-      {(book.collectionId || book.subCollectionId) && (
-        <span className="hidden md:inline text-[10px] text-[var(--gold-dim)] bg-[var(--gold-glow2)] px-2 py-0.5 rounded border border-[rgba(201,171,110,0.12)] whitespace-nowrap">
-          {book.subCollectionId || book.collectionId}
-        </span>
-      )}
-      <button
-        onClick={() => removeBook(book.id)}
-        className="p-1.5 text-[var(--text-muted)] hover:text-red-400 hover:bg-red-400/10 rounded transition-colors flex-shrink-0"
-        aria-label="Remover livro"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
-    </li>
   );
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1006,7 +788,7 @@ function App() {
           </div>
         </div>
 
-        <nav className="flex-1 p-3 space-y-0.5">
+        <nav aria-label="Principal" className="flex-1 p-3 space-y-0.5">
           {NAV_ITEMS.map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -1103,19 +885,83 @@ function App() {
               <div className="gold-line mt-3" />
             </div>
 
-            {/* Search */}
+            {/* Search + filters */}
             <div className="px-4 lg:px-10 pb-4 space-y-3">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
                 <Input
+                  type="search"
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   placeholder="Buscar título ou autor…"
-                  className="pl-10 bg-[var(--bg-3)] border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] h-10 focus:border-[var(--gold-dim)] transition-colors"
+                  className="pl-10 pr-10 bg-[var(--bg-3)] border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text-muted)] h-10 focus:border-[var(--gold-dim)] transition-colors [&::-webkit-search-cancel-button]:hidden"
                   aria-label="Buscar livros"
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-white/5"
+                    aria-label="Limpar busca"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div role="group" aria-label="Filtrar por formato" className="flex items-center gap-1 bg-[var(--bg-3)] rounded-lg p-1 border border-[var(--border)]">
+                  {FORMAT_FILTERS.map(({ id, label }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setFormatFilter(id)}
+                      aria-pressed={formatFilter === id}
+                      className={`px-3 py-1 rounded text-xs transition-colors ${
+                        formatFilter === id
+                          ? 'bg-[var(--gold-glow)] text-[var(--gold)]'
+                          : 'text-[var(--text-muted)] hover:text-[var(--text-sub)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  value={sortMode}
+                  onChange={e => setSortMode(e.target.value as SortMode)}
+                  aria-label="Ordenar livros"
+                  className="h-9 px-3 rounded-lg bg-[var(--bg-3)] border border-[var(--border)] text-xs text-[var(--text-sub)] focus:outline-none focus:border-[var(--gold-dim)]"
+                >
+                  {SORT_OPTIONS.map(({ id, label }) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
+                <span role="status" aria-live="polite" className="sr-only">
+                  {filteredBooks.length} {filteredBooks.length === 1 ? 'livro encontrado' : 'livros encontrados'}
+                </span>
               </div>
             </div>
+
+            {/* Abertos recentemente */}
+            {!selectedCollection && !searchQuery && formatFilter === 'all' && recentBooks.length > 0 && (
+              <div className="px-4 lg:px-10 pb-5">
+                <h3 className="font-serif text-base text-[var(--text-sub)] mb-2">Continue de onde parou</h3>
+                <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1" data-testid="recent-shelf">
+                  {recentBooks.map(book => (
+                    <button
+                      key={book.id}
+                      type="button"
+                      onClick={() => openBook(book)}
+                      aria-label={`Continuar ${book.title}`}
+                      className="relative flex-shrink-0 w-20 aspect-[2/3] rounded-md overflow-hidden border border-[var(--border)] hover:border-[var(--border-3)] transition-colors"
+                    >
+                      <BookCover book={book} priority={false} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Books grid or list */}
             <div className="px-4 lg:px-10 pb-10">
@@ -1126,6 +972,15 @@ function App() {
                   </div>
                   <h3 className="font-serif text-xl text-[var(--text)] mb-2">Nenhum livro encontrado</h3>
                   <p className="text-sm text-[var(--text-muted)]">Tente outra busca ou ajuste os filtros.</p>
+                  {(searchQuery || formatFilter !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => { setSearchQuery(''); setFormatFilter('all'); }}
+                      className="mt-4 px-4 py-2 rounded-full border border-[var(--border-2)] text-xs text-[var(--gold)] hover:bg-[var(--gold-glow)]"
+                    >
+                      Limpar busca e filtros
+                    </button>
+                  )}
                 </div>
               ) : viewMode === 'grid' ? (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-3 lg:gap-4">
@@ -1220,7 +1075,7 @@ function App() {
       </main>
 
       {/* Mobile Bottom Navigation */}
-      <nav className="lg:hidden bottom-nav">
+      <nav aria-label="Principal (celular)" className="lg:hidden bottom-nav">
         {NAV_ITEMS.map(({ id, label, Icon }) => (
           <button
             key={id}
@@ -1237,8 +1092,6 @@ function App() {
       {/* Reader */}
       {renderReader()}
 
-      {/* Toast */}
-      <Toast message={toast.message} show={toast.show} />
     </div>
   );
 }

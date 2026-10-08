@@ -117,6 +117,12 @@ body::after {
   z-index: 9996;
 }
 
+/* Leitor aberto: sem vinheta/ruído por cima das páginas (escureciam as bordas do texto). */
+body:has(.pdf-reader-root)::before,
+body:has(.pdf-reader-root)::after {
+  display: none;
+}
+
 /* ============================================
    SCROLLBAR — fina e dourada
    ============================================ */
