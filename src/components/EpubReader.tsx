@@ -233,6 +233,12 @@ export function EpubReader({
 
       const prevent = (event: Event) => event.preventDefault();
 
+      // Evita que o iframe do capítulo, ao ganhar foco, role o container
+      // principal para "mostrar" o conteúdo (causa de saltos de tela).
+      doc.addEventListener('focusin', () => {
+        shellRef.current?.holdScroll();
+      });
+
       doc.addEventListener('selectstart', prevent);
       doc.addEventListener('copy', prevent);
       doc.addEventListener('cut', prevent);
@@ -493,11 +499,15 @@ export function EpubReader({
      Navegação / ações
   ───────────────────────────────────────────────────────────────────────── */
 
+  // O epub.js mexe em foco/scroll ao exibir outra "página"; travamos o scroll
+  // do container ANTES de pedir a troca, para o ponto do usuário não pular.
   const nextPage = useCallback(() => {
+    shellRef.current?.holdScroll();
     renditionRef.current?.next().catch(() => {});
   }, []);
 
   const previousPage = useCallback(() => {
+    shellRef.current?.holdScroll();
     renditionRef.current?.prev().catch(() => {});
   }, []);
 
@@ -517,6 +527,8 @@ export function EpubReader({
   const toggleToc = useCallback(() => setShowToc((value) => !value), []);
 
   const goToChapter = useCallback((href: string) => {
+    shellRef.current?.holdScroll();
+
     renditionRef.current
       ?.display(href)
       .then(() => setShowToc(false))

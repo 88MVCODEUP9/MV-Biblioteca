@@ -281,20 +281,9 @@ export function useEntranceTransition(): string {
    para que os dois leiam, ampliem e se ajustem à tela exatamente igual.
 ────────────────────────────────────────────────────────────────────────── */
 
-export const MIN_ZOOM = 0.15;
-export const MAX_ZOOM = 4;
-export const DEFAULT_ZOOM = 1;
-
-/** Níveis de 15% a 400%, de 5 em 5%. */
-export const ZOOM_LEVELS: number[] = Array.from({ length: 78 }, (_, index) =>
-  Math.round((MIN_ZOOM + index * 0.05) * 100) / 100
-);
-
 /** Tamanho base de uma página A4, em pontos (PDF) / pixels CSS (EPUB). */
 export const PAGE_WIDTH = 595;
 export const PAGE_HEIGHT = 842;
-
-export type ZoomMode = 'fit' | 'manual';
 
 export interface ViewportInfo {
   width: number;
@@ -332,134 +321,8 @@ export function useViewport(): ViewportInfo {
   };
 }
 
-interface PageZoomOptions {
-  containerRef: React.RefObject<HTMLElement | null>;
-  viewport: ViewportInfo;
-  pageWidth: number;
-  pageHeight: number;
-  rotation: number;
-  /** Só calcula o "ajustar à tela" quando o conteúdo já está pronto. */
-  enabled: boolean;
-}
-
-export interface PageZoom {
-  scale: number;
-  zoomMode: ZoomMode;
-  zoomPercentage: string;
-  zoomIn: () => void;
-  zoomOut: () => void;
-  setManualZoom: (value: number) => void;
-  fitToScreen: () => void;
-}
-
-/**
- * Lógica de zoom única para PDF e EPUB:
- * - "ajustar à tela" usa o tamanho REAL da página (não só A4) e respeita rotação;
- * - celular/tablet priorizam a largura; desktop encaixa a página inteira;
- * - zoom manual em passos de 5% (15% – 400%).
- */
-export function usePageZoom({
-  containerRef,
-  viewport,
-  pageWidth,
-  pageHeight,
-  rotation,
-  enabled,
-}: PageZoomOptions): PageZoom {
-  const [scale, setScale] = useState(DEFAULT_ZOOM);
-  const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
-
-  const { isMobile, isTablet } = viewport;
-
-  const calculateFitZoom = useCallback(() => {
-    const container = containerRef.current;
-
-    if (!container) return DEFAULT_ZOOM;
-
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
-    if (!width || !height) return DEFAULT_ZOOM;
-
-    const swapped = rotation % 180 !== 0;
-    const contentWidth = swapped ? pageHeight : pageWidth;
-    const contentHeight = swapped ? pageWidth : pageHeight;
-
-    // Mesmos respiros do container da página (px / py).
-    const horizontalPadding = isMobile ? 0 : 32;
-    const verticalPadding = isMobile ? 24 : 48;
-
-    const widthScale =
-      Math.max(width - horizontalPadding, 200) / contentWidth;
-    const heightScale =
-      Math.max(height - verticalPadding, 200) / contentHeight;
-
-    const value =
-      isMobile || isTablet
-        ? widthScale
-        : Math.min(widthScale, heightScale);
-
-    return clamp(value, MIN_ZOOM, MAX_ZOOM);
-  }, [containerRef, isMobile, isTablet, pageHeight, pageWidth, rotation]);
-
-  useEffect(() => {
-    if (!enabled || zoomMode !== 'fit') return;
-
-    const timer = window.setTimeout(() => {
-      setScale(calculateFitZoom());
-    }, 100);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    calculateFitZoom,
-    enabled,
-    zoomMode,
-    viewport.width,
-    viewport.height,
-  ]);
-
-  const setManualZoom = useCallback((value: number) => {
-    setZoomMode('manual');
-    setScale(clamp(value, MIN_ZOOM, MAX_ZOOM));
-  }, []);
-
-  const zoomIn = useCallback(() => {
-    setZoomMode('manual');
-    setScale((current) =>
-      ZOOM_LEVELS.find((level) => level > current + 0.001) ?? MAX_ZOOM
-    );
-  }, []);
-
-  const zoomOut = useCallback(() => {
-    setZoomMode('manual');
-    setScale((current) => {
-      for (let index = ZOOM_LEVELS.length - 1; index >= 0; index -= 1) {
-        if (ZOOM_LEVELS[index] < current - 0.001) return ZOOM_LEVELS[index];
-      }
-
-      return MIN_ZOOM;
-    });
-  }, []);
-
-  const fitToScreen = useCallback(() => {
-    setZoomMode('fit');
-    setScale(calculateFitZoom());
-
-    window.requestAnimationFrame(() => {
-      containerRef.current?.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    });
-  }, [calculateFitZoom, containerRef]);
-
-  return {
-    scale,
-    zoomMode,
-    zoomPercentage: `${Math.round(scale * 100)}%`,
-    zoomIn,
-    zoomOut,
-    setManualZoom,
-    fitToScreen,
-  };
-}
+// Re-export ZoomBar and new usePageZoom from ZoomBar module
+export { ZoomBar, usePageZoom, type PageZoomState, type PageZoomOptions } from './ZoomBar';
 
 
 /** Classes dos botões da barra do leitor (iguais em PDF e EPUB). */

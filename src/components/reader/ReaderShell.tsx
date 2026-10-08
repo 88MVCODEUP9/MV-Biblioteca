@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -16,24 +17,22 @@ import {
   Loader2,
   Maximize,
   Minimize,
-  MonitorDown,
   RotateCw,
   X,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
 
 import {
-  READER_BUTTON_ACTIVE_CLASS,
   READER_BUTTON_CLASS,
-  ZOOM_LEVELS,
+  clamp,
   useAutoHideControls,
   useBodyScrollLock,
   useEntranceTransition,
   useFullscreen,
   usePageZoom,
   useViewport,
+  ZoomBar,
 } from './reader-kit';
+import { MAX_ZOOM, MIN_ZOOM } from './ZoomBar';
 
 /* ─────────────────────────────────────────────────────────────────────────────
    ReaderShell
@@ -59,6 +58,8 @@ export interface ReaderShellHandle {
   isPanMode: () => boolean;
   /** Ctrl + roda / pinça vindos de dentro de um iframe. */
   wheelZoom: (deltaY: number) => void;
+  /** Chamar ANTES de trocar página/capítulo: trava o scroll até o conteúdo novo assentar. */
+  holdScroll: () => void;
 }
 
 export interface ReaderShellProps {
@@ -105,7 +106,27 @@ export interface ReaderShellProps {
 }
 
 const buttonClass = READER_BUTTON_CLASS;
-const activeButtonClass = READER_BUTTON_ACTIVE_CLASS;
+
+/* Botões laterais: 15% de opacidade em repouso, 80% ao passar o mouse na lateral. */
+const sideButtonClass = `
+  fixed
+  top-1/2
+  -translate-y-1/2
+  z-20
+  flex
+  items-center
+  w-14 sm:w-24
+  h-40 sm:h-[55vh]
+  text-white
+  opacity-15
+  hover:opacity-80
+  focus-visible:opacity-80
+  active:opacity-80
+  disabled:opacity-0
+  disabled:pointer-events-none
+  transition-opacity
+  duration-200
+`;
 
 export function ReaderShell({
   ref,
@@ -143,7 +164,7 @@ export function ReaderShell({
   const activeLevelRef = useRef<HTMLButtonElement | null>(null);
 
   const viewport = useViewport();
-  const { isMobile, isTablet, isDesktop } = viewport;
+  const { isMobile } = viewport;
 
   const [rotation, setRotation] = useState(0);
   const [showZoomMenu, setShowZoomMenu] = useState(false);
@@ -162,7 +183,6 @@ export function ReaderShell({
   const {
     scale,
     zoomMode,
-    zoomPercentage,
     zoomIn,
     zoomOut,
     setManualZoom,
@@ -171,11 +191,186 @@ export function ReaderShell({
 
   const { isFullscreen, toggleFullscreen } = useFullscreen(rootRef);
 
+  /* ─────────────────────────────────────────────────────────────────────────
+     Zoom sem "pular": guarda o ponto central visível e o devolve ao centro
+     depois de cada mudança de escala (senão a página ampliada vai para o canto).
+  ───────────────────────────────────────────────────────────────────────── */
+
+  const centerRatio = useRef({ x: 0.5, y: 0.5 });
+
+  // Última posição de rolagem escolhida pelo usuário (em pixels).
+  const scrollMemory = useRef({ left: 0, top: 0 });
+
+  // Enquanto uma troca de página está em andamento (conteúdo novo carregando,
+  // altura do conteúdo oscilando), o navegador "prende" o scrollTop e dispara
+  // eventos de scroll com valores falsos. Congelamos a memória nesse período.
+  const scrollFrozen = useRef(false);
+  const unlockTimer = useRef<number | null>(null);
+  const lockObserver = useRef<ResizeObserver | null>(null);
+  const lockCleanup = useRef<(() => void) | null>(null);
+
+  const readScrollPosition = useCallback(() => {
+    const element = contentRef.current;
+
+    if (!element) return;
+
+    const { scrollLeft, scrollTop, scrollWidth, scrollHeight, clientWidth, clientHeight } = element;
+
+    scrollMemory.current = { left: scrollLeft, top: scrollTop };
+
+    centerRatio.current = {
+      x: scrollWidth ? (scrollLeft + clientWidth / 2) / scrollWidth : 0.5,
+      y: scrollHeight ? (scrollTop + clientHeight / 2) / scrollHeight : 0.5,
+    };
+  }, []);
+
+  const releaseScrollLock = useCallback(() => {
+    if (unlockTimer.current !== null) {
+      window.clearTimeout(unlockTimer.current);
+      unlockTimer.current = null;
+    }
+
+    lockCleanup.current?.();
+    lockCleanup.current = null;
+
+    lockObserver.current?.disconnect();
+    lockObserver.current = null;
+
+    scrollFrozen.current = false;
+  }, []);
+
+  /*
+   * Trava a posição de rolagem durante a troca de página / capítulo:
+   *  1. congela a memória (eventos de scroll gerados pelo próprio navegador
+   *     ao encolher/crescer o conteúdo não sobrescrevem a posição do usuário);
+   *  2. devolve a posição guardada agora e a cada mudança de tamanho do
+   *     conteúdo, até a página nova terminar de carregar;
+   *  3. se o usuário rolar de propósito (roda, toque, teclado), solta a trava.
+   * Pode ser chamada várias vezes: a posição salva na 1ª chamada é mantida.
+   */
+  const lockScroll = useCallback(() => {
+    const element = contentRef.current;
+
+    if (!element) return;
+
+    if (!scrollFrozen.current) {
+      readScrollPosition();
+    }
+
+    scrollFrozen.current = true;
+
+    const restore = () => {
+      const { left, top } = scrollMemory.current;
+
+      if (element.scrollLeft !== left) element.scrollLeft = left;
+      if (element.scrollTop !== top) element.scrollTop = top;
+    };
+
+    restore();
+
+    if (unlockTimer.current === null) {
+      window.requestAnimationFrame(restore);
+
+      const userScroll = () => {
+        releaseScrollLock();
+        readScrollPosition();
+      };
+
+      const events = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
+
+      events.forEach((name) =>
+        element.addEventListener(name, userScroll, { passive: true })
+      );
+
+      lockCleanup.current = () =>
+        events.forEach((name) => element.removeEventListener(name, userScroll));
+
+      if (typeof ResizeObserver !== 'undefined') {
+        lockObserver.current = new ResizeObserver(restore);
+        lockObserver.current.observe(element);
+        Array.from(element.children).forEach((child) =>
+          lockObserver.current?.observe(child)
+        );
+      }
+    } else {
+      window.clearTimeout(unlockTimer.current);
+    }
+
+    unlockTimer.current = window.setTimeout(() => {
+      unlockTimer.current = null;
+      restore();
+      releaseScrollLock();
+      readScrollPosition();
+    }, 450);
+  }, [readScrollPosition, releaseScrollLock]);
+
+  useEffect(() => {
+    const element = contentRef.current;
+
+    if (!element) return;
+
+    const remember = () => {
+      if (scrollFrozen.current) return;
+
+      readScrollPosition();
+    };
+
+    element.addEventListener('scroll', remember, { passive: true });
+
+    return () => {
+      element.removeEventListener('scroll', remember);
+      releaseScrollLock();
+    };
+  }, [readScrollPosition, releaseScrollLock]);
+
+  // ZOOM / ROTAÇÃO: mantém o ponto central visível (comportamento original).
+  useLayoutEffect(() => {
+    const element = contentRef.current;
+
+    if (!element) return;
+
+    element.scrollLeft = centerRatio.current.x * element.scrollWidth - element.clientWidth / 2;
+    element.scrollTop = centerRatio.current.y * element.scrollHeight - element.clientHeight / 2;
+
+    // Atualiza a memória (em px) para a nova escala; senão a trava de troca de
+    // página devolveria pixels da escala antiga.
+    readScrollPosition();
+  }, [scale, readScrollPosition]);
+
+  // TROCA DE PÁGINA: NÃO recentraliza nem volta ao topo — preserva o scroll.
+  // (A 1ª página, quando pageNumber sai de null, continua centralizada pelo
+  // efeito de zoom acima.)
+  const previousPageNumber = useRef<number | null>(pageNumber);
+
+  useLayoutEffect(() => {
+    const previous = previousPageNumber.current;
+
+    previousPageNumber.current = pageNumber;
+
+    if (previous === null || pageNumber === null || previous === pageNumber) {
+      return;
+    }
+
+    lockScroll();
+  }, [pageNumber, lockScroll]);
+
   useBodyScrollLock();
 
-  const { visible: showControls, wake: wakeControls } = useAutoHideControls({
+  const { visible: showControls, wake: wakeHeader } = useAutoHideControls({
     suspended: loading || Boolean(error) || showZoomMenu || panelOpen,
   });
+
+  // A barra de zoom some mais cedo (2,5 s) para não atrapalhar a leitura
+  // e volta a qualquer toque / movimento do mouse.
+  const { visible: showZoomBar, wake: wakeZoomBar } = useAutoHideControls({
+    idleMs: 2500,
+    suspended: loading || Boolean(error),
+  });
+
+  const wakeControls = useCallback(() => {
+    wakeHeader();
+    wakeZoomBar();
+  }, [wakeHeader, wakeZoomBar]);
 
   const entranceClass = useEntranceTransition();
 
@@ -454,8 +649,10 @@ export function ReaderShell({
       isPanMode: () => scaleRef.current > 1.3,
 
       wheelZoom,
+
+      holdScroll: lockScroll,
     }),
-    [runGesture, wakeControls, wheelZoom]
+    [lockScroll, runGesture, wakeControls, wheelZoom]
   );
 
   /* ─────────────────────────────────────────────────────────────────────────
@@ -463,6 +660,12 @@ export function ReaderShell({
   ───────────────────────────────────────────────────────────────────────── */
 
   const pageLabel = `${pageNumber ?? '—'} / ${numPages ?? '—'}`;
+
+  // Progresso de 0% (primeira página) a 100% (última página).
+  const progress =
+    pageNumber && numPages && numPages > 1
+      ? clamp(((pageNumber - 1) / (numPages - 1)) * 100, 0, 100)
+      : 0;
 
   return (
     <div
@@ -486,10 +689,10 @@ export function ReaderShell({
         if (event.target === event.currentTarget) wakeControls();
       }}
     >
-      {/* HEADER */}
+      {/* BARRA DE AÇÕES SUPERIOR */}
 
       <header
-        aria-hidden={!showControls}
+        aria-hidden={!showZoomBar}
         className={`
           relative
           z-30
@@ -501,8 +704,6 @@ export function ReaderShell({
           min-h-[56px]
           shrink-0
           bg-[var(--bg-2)]
-          border-b
-          border-[var(--border)]
           shadow-lg
           transition-[opacity,transform]
           duration-300 ease-out
@@ -543,246 +744,85 @@ export function ReaderShell({
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold truncate">{title}</p>
 
-          {!isMobile && (
-            <p className="text-[11px] text-[var(--text-muted)] truncate">
-              {author} · {formatLabel}
-            </p>
-          )}
-        </div>
-
-        {/* ZOOM */}
-
-        <div ref={zoomMenuRef} className="relative hidden sm:flex items-center">
-          <div
-            className="
-              flex
-              items-center
-              gap-0.5
-              p-1
-              rounded-xl
-              bg-[var(--bg-3)]
-              border
-              border-[var(--border)]
-              shadow-sm
-            "
-          >
-            <button
-              type="button"
-              onClick={fitToScreen}
-              className={`
-                ${buttonClass}
-                w-9 h-9
-                ${zoomMode === 'fit' ? activeButtonClass : ''}
-              `}
-              title="Ajustar à tela (0)"
-              aria-label="Ajustar à tela"
-            >
-              <MonitorDown className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={zoomOut}
-              className={`${buttonClass} w-9 h-9`}
-              title="Diminuir zoom (-)"
-              aria-label="Diminuir zoom"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowZoomMenu((value) => !value)}
-              className="
-                min-w-[64px]
-                h-9
-                px-2
-                rounded-lg
-                text-xs
-                font-semibold
-                text-[var(--text)]
-                hover:bg-[var(--gold-glow)]
-                transition-colors
-              "
-              title="Selecionar zoom"
-              aria-label={`Zoom atual ${zoomPercentage}`}
-              aria-expanded={showZoomMenu}
-            >
-              {zoomPercentage}
-            </button>
-
-            <button
-              type="button"
-              onClick={zoomIn}
-              className={`${buttonClass} w-9 h-9`}
-              title="Aumentar zoom (+)"
-              aria-label="Aumentar zoom"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-          </div>
-
-          {showZoomMenu && (
-            <div
-              className="
-                absolute
-                top-[calc(100%+8px)]
-                right-0
-                z-50
-                w-44
-                max-h-[60vh]
-                overflow-y-auto
-                p-2
-                rounded-2xl
-                bg-[var(--bg-2)]
-                border
-                border-[var(--border)]
-                shadow-2xl
-              "
-            >
-              <p
-                className="
-                  px-3 py-2
-                  text-[10px]
-                  uppercase
-                  tracking-wider
-                  text-[var(--text-muted)]
-                "
-              >
-                Nível de zoom
-              </p>
-
-              <div className="grid grid-cols-2 gap-1">
-                {ZOOM_LEVELS.map((level) => {
-                  const active = Math.abs(scale - level) < 0.01;
-
-                  return (
-                    <button
-                      type="button"
-                      key={level}
-                      ref={active ? activeLevelRef : undefined}
-                      onClick={() => {
-                        setManualZoom(level);
-                        setShowZoomMenu(false);
-                      }}
-                      className={`
-                        px-2
-                        py-2
-                        rounded-lg
-                        text-xs
-                        transition-colors
-                        ${
-                          active
-                            ? 'bg-[var(--gold-glow)] text-[var(--gold)]'
-                            : 'text-[var(--text-sub)] hover:bg-[var(--bg-3)]'
-                        }
-                      `}
-                    >
-                      {Math.round(level * 100)}%
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* NAVEGAÇÃO */}
-
-        <div
-          className="
-            hidden md:flex
-            items-center
-            gap-1
-            px-1
-            py-1
-            rounded-xl
-            bg-[var(--bg-3)]
-            border
-            border-[var(--border)]
-          "
-        >
-          <button
-            type="button"
-            onClick={onPrev}
-            disabled={!canPrev}
-            className={`${buttonClass} w-9 h-9`}
-            title="Página anterior"
-            aria-label="Página anterior"
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </button>
-
-          <span
-            className="
-              min-w-[80px]
-              text-center
-              text-xs
-              font-medium
-              text-[var(--text)]
-            "
-          >
-            {pageLabel}
-          </span>
-
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={!canNext}
-            className={`${buttonClass} w-9 h-9`}
-            title="Próxima página"
-            aria-label="Próxima página"
-          >
-            <ChevronRight className="w-5 h-5" />
-          </button>
+          <p className="text-[11px] text-[var(--text-muted)] truncate">
+            {isMobile ? pageLabel : `${author} · ${formatLabel} · ${pageLabel}`}
+          </p>
         </div>
 
         {/* Extras do formato (ex.: sumário) */}
 
         {headerExtras}
 
-        {/* Rotação */}
+        {/* Ações: tela cheia · girar · baixar */}
 
-        <button
-          type="button"
-          onClick={rotate}
-          className={`${buttonClass} w-10 h-10`}
-          title="Rotacionar página (R)"
-          aria-label="Rotacionar página"
+        <div
+          className="
+            flex
+            items-center
+            gap-0.5
+            p-1
+            rounded-xl
+            bg-[var(--bg-3)]
+            border
+            border-[var(--border)]
+            shrink-0
+          "
+          role="toolbar"
+          aria-label="Ações do leitor"
         >
-          <RotateCw className="w-4 h-4" />
-        </button>
-
-        {/* Download */}
-
-        {!isMobile && onDownload && (
           <button
             type="button"
-            onClick={onDownload}
-            className={`${buttonClass} w-10 h-10`}
-            title={`Baixar ${formatLabel}`}
-            aria-label={`Baixar ${formatLabel}`}
+            onClick={() => void toggleFullscreen()}
+            className={`${buttonClass} w-9 h-9`}
+            title={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}
+            aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
           >
-            <Download className="w-4 h-4" />
+            {isFullscreen ? (
+              <Minimize className="w-4 h-4" />
+            ) : (
+              <Maximize className="w-4 h-4" />
+            )}
           </button>
-        )}
 
-        {/* Fullscreen */}
+          <button
+            type="button"
+            onClick={rotate}
+            className={`${buttonClass} w-9 h-9`}
+            title="Girar página / orientação (R)"
+            aria-label="Girar página"
+          >
+            <RotateCw className="w-4 h-4" />
+          </button>
 
-        <button
-          type="button"
-          onClick={() => void toggleFullscreen()}
-          className={`${buttonClass} w-10 h-10`}
-          title={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}
-          aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-        >
-          {isFullscreen ? (
-            <Minimize className="w-4 h-4" />
-          ) : (
-            <Maximize className="w-4 h-4" />
+          {onDownload && (
+            <button
+              type="button"
+              onClick={onDownload}
+              className={`${buttonClass} w-9 h-9`}
+              title={`Baixar ${formatLabel}`}
+              aria-label={`Baixar ${formatLabel}`}
+            >
+              <Download className="w-4 h-4" />
+            </button>
           )}
-        </button>
+        </div>
       </header>
+
+      {/* LINHA DE PROGRESSO (sempre visível, colada abaixo da barra) */}
+
+      <div
+        role="progressbar"
+        aria-label="Progresso de leitura"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(progress)}
+        className="relative z-30 h-[3px] shrink-0 bg-white/10"
+      >
+        <div
+          className="h-full bg-[var(--gold)] transition-[width] duration-300 ease-out"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
 
       {/* ÁREA DE LEITURA */}
 
@@ -967,6 +1007,10 @@ export function ReaderShell({
             z-10
             flex
             min-h-full
+            min-w-full
+            w-max
+            items-center
+            justify-center
             px-0
             sm:px-4
             py-3
@@ -977,15 +1021,17 @@ export function ReaderShell({
           }}
         >
           {/*
-            m-auto (e não justify-center): quando a página ampliada fica maior
-            que a tela, o lado esquerdo continua acessível pela rolagem.
+            Centraliza a página. `w-max min-w-full` deixa este contêiner
+            crescer junto com a página ampliada, então os dois lados ficam
+            alcançáveis pela rolagem (sem cortar a esquerda). A escala é
+            aplicada pelo próprio conteúdo (Page do PDF / ScaledStage do EPUB).
           */}
-          <div className="m-auto select-none">
+          <div className="select-none">
             {children({ scale, rotation })}
           </div>
         </div>
 
-        {/* Navegação lateral */}
+        {/* Botões laterais de passar página: discretos (15%) e 80% no hover */}
 
         {ready && (
           <>
@@ -993,56 +1039,22 @@ export function ReaderShell({
               type="button"
               onClick={onPrev}
               disabled={!canPrev}
-              className="
-                hidden sm:flex
-                fixed
-                left-4
-                top-1/2
-                -translate-y-1/2
-                z-20
-                w-11 h-20
-                items-center
-                justify-center
-                rounded-2xl
-                bg-transparent
-                text-white/35
-                hover:bg-black/20
-                hover:text-white/80
-                disabled:opacity-0
-                transition-all
-              "
-              title="Página anterior"
+              className={`${sideButtonClass} left-0 justify-start pl-1 sm:pl-3`}
+              title="Página anterior (←)"
               aria-label="Página anterior"
             >
-              <ChevronLeft className="w-6 h-6" />
+              <ChevronLeft className="w-7 h-7 sm:w-9 sm:h-9" />
             </button>
 
             <button
               type="button"
               onClick={onNext}
               disabled={!canNext}
-              className="
-                hidden sm:flex
-                fixed
-                right-4
-                top-1/2
-                -translate-y-1/2
-                z-20
-                w-11 h-20
-                items-center
-                justify-center
-                rounded-2xl
-                bg-transparent
-                text-white/35
-                hover:bg-black/20
-                hover:text-white/80
-                disabled:opacity-0
-                transition-all
-              "
-              title="Próxima página"
+              className={`${sideButtonClass} right-0 justify-end pr-1 sm:pr-3`}
+              title="Próxima página (→)"
               aria-label="Próxima página"
             >
-              <ChevronRight className="w-6 h-6" />
+              <ChevronRight className="w-7 h-7 sm:w-9 sm:h-9" />
             </button>
           </>
         )}
@@ -1064,7 +1076,7 @@ export function ReaderShell({
               shadow-2xl
               overflow-y-auto
             "
-            style={{ top: 56 }}
+            style={{ top: 59 }}
           >
             <div
               className="
@@ -1098,176 +1110,20 @@ export function ReaderShell({
         )}
       </main>
 
-      {/* FOOTER MOBILE / TABLET */}
+      {/* BARRA DE ZOOM FLUTUANTE — só existe dentro do leitor */}
 
-      {(isMobile || isTablet) && ready && (
-        <footer
-          aria-hidden={!showControls}
-          className={`
-            relative
-            z-30
-            flex
-            items-center
-            justify-between
-            gap-2
-            px-3
-            py-2
-            min-h-[58px]
-            bg-[var(--bg-2)]
-            border-t
-            border-[var(--border)]
-            transition-[opacity,transform]
-            duration-300 ease-out
-            ${
-              showControls
-                ? 'opacity-100 translate-y-0 pointer-events-auto'
-                : 'opacity-0 translate-y-3 pointer-events-none'
-            }
-          `}
-        >
-          <button
-            type="button"
-            onClick={onPrev}
-            disabled={!canPrev}
-            className="
-              w-11 h-11
-              flex
-              items-center
-              justify-center
-              rounded-xl
-              text-[var(--text-sub)]
-              hover:text-[var(--gold)]
-              hover:bg-[var(--gold-glow)]
-              disabled:opacity-30
-            "
-            aria-label="Página anterior"
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-
-          <div
-            className="
-              flex
-              items-center
-              gap-1
-              px-1
-              py-1
-              rounded-xl
-              bg-[var(--bg-3)]
-            "
-          >
-            <button
-              type="button"
-              onClick={zoomOut}
-              className="
-                w-9 h-9
-                flex
-                items-center
-                justify-center
-                rounded-lg
-                hover:bg-[var(--gold-glow)]
-                hover:text-[var(--gold)]
-              "
-              aria-label="Diminuir zoom"
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={fitToScreen}
-              className="min-w-[55px] text-xs font-semibold"
-              title="Ajustar à tela"
-              aria-label={`Zoom atual ${zoomPercentage}. Toque para ajustar à tela`}
-            >
-              {zoomPercentage}
-            </button>
-
-            <button
-              type="button"
-              onClick={zoomIn}
-              className="
-                w-9 h-9
-                flex
-                items-center
-                justify-center
-                rounded-lg
-                hover:bg-[var(--gold-glow)]
-                hover:text-[var(--gold)]
-              "
-              aria-label="Aumentar zoom"
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-          </div>
-
-          <span
-            className="
-              absolute
-              left-1/2
-              -translate-x-1/2
-              bottom-[-1px]
-              px-2
-              py-0.5
-              rounded-t-lg
-              bg-[var(--bg-3)]
-              text-[9px]
-              text-[var(--text-muted)]
-            "
-          >
-            {pageLabel}
-          </span>
-
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={!canNext}
-            className="
-              w-11 h-11
-              flex
-              items-center
-              justify-center
-              rounded-xl
-              text-[var(--text-sub)]
-              hover:text-[var(--gold)]
-              hover:bg-[var(--gold-glow)]
-              disabled:opacity-30
-            "
-            aria-label="Próxima página"
-          >
-            <ChevronRight className="w-6 h-6" />
-          </button>
-        </footer>
-      )}
-
-      {/* DICA DE ATALHOS — DESKTOP */}
-
-      {isDesktop && ready && (
-        <div
-          className="
-            pointer-events-none
-            fixed
-            bottom-4
-            left-1/2
-            -translate-x-1/2
-            z-20
-            px-4
-            py-2
-            rounded-full
-            bg-black/50
-            backdrop-blur-md
-            border
-            border-white/10
-            text-[10px]
-            text-white/60
-            opacity-0
-            hover:opacity-100
-            transition-opacity
-          "
-        >
-          ← → páginas · + − zoom · 0 ajustar · R girar · F tela cheia
-          {onTogglePanel ? ' · T sumário' : ''} · Ctrl + roda zoom
-        </div>
+      {ready && (
+        <ZoomBar
+          zoom={Math.round(scale * 100)}
+          onZoomIn={zoomIn}
+          onZoomOut={zoomOut}
+          onReset={fitToScreen}
+          scrollRef={contentRef}
+          minZoom={MIN_ZOOM}
+          maxZoom={MAX_ZOOM}
+          hidden={!showControls}
+          onActivity={wakeControls}
+        />
       )}
     </div>
   );

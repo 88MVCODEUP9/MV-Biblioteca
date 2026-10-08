@@ -1,4 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+
+import type { ReaderShellHandle } from './reader/ReaderShell';
 
 import { Document, Page, pdfjs } from 'react-pdf';
 
@@ -68,11 +70,18 @@ export function PDFReader({
     height: PAGE_HEIGHT,
   });
 
+  const shellRef = useRef<ReaderShellHandle>(null);
+
+  // Trava o scroll ANTES de trocar a página: o <Page> do react-pdf troca o
+  // canvas por um placeholder durante o carregamento, o que faz o navegador
+  // encolher o conteúdo e "cortar" o scrollTop.
   const previousPage = useCallback(() => {
+    shellRef.current?.holdScroll();
     setPageNumber((page) => Math.max(page - 1, 1));
   }, []);
 
   const nextPage = useCallback(() => {
+    shellRef.current?.holdScroll();
     setPageNumber((page) => Math.min(page + 1, numPages));
   }, [numPages]);
 
@@ -82,6 +91,7 @@ export function PDFReader({
 
   return (
     <ReaderShell
+      ref={shellRef}
       title={title}
       author={author}
       formatLabel="PDF"
@@ -123,7 +133,8 @@ export function PDFReader({
             file={url}
             onLoadSuccess={({ numPages: total }) => {
               setNumPages(total);
-              setPageNumber(1);
+              // Não volta para a página 1 se o Document recarregar: mantém a atual.
+              setPageNumber((current) => Math.min(Math.max(current, 1), total));
               setIsLoading(false);
               setError(null);
             }}
@@ -139,7 +150,19 @@ export function PDFReader({
             error={null}
           >
             {!isLoading && !error && numPages > 0 && (
-              <div className="relative select-none">
+              <div
+                className="relative select-none"
+                style={{
+                  // Reserva o tamanho da página enquanto a nova carrega, para o
+                  // container não encolher (e o scrollTop não ser reduzido).
+                  minWidth:
+                    (rotation % 180 === 0 ? pageSize.width : pageSize.height) *
+                    scale,
+                  minHeight:
+                    (rotation % 180 === 0 ? pageSize.height : pageSize.width) *
+                    scale,
+                }}
+              >
                 <Page
                   pageNumber={pageNumber}
                   scale={scale}
