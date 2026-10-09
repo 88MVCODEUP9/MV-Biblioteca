@@ -424,6 +424,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   { id:"315", title:"Caçadores de Bruxas", author:"Raphael Draccon", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/Drag%C3%B5es%20de%20%C3%89ter/01%20-%20Ca%C3%A7adores%20de%20Bruxas.epub", coverPath:"https://mvin2006.github.io/LIVROS/Drag%C3%B5es%20de%20%C3%89ter/01%20-%20Ca%C3%A7adores%20de%20Bruxas.webp", collectionId:"Dragões de Éter", addedDate:"2026-09-17T00:00:00.000Z" },
   { id:"316", title:"Corações de Neve", author:"Raphael Draccon", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/Drag%C3%B5es%20de%20%C3%89ter/02%20-%20Cora%C3%A7%C3%B5es%20de%20Neve.epub", coverPath:"https://mvin2006.github.io/LIVROS/Drag%C3%B5es%20de%20%C3%89ter/02%20-%20Cora%C3%A7%C3%B5es%20de%20Neve.webp", collectionId:"Dragões de Éter", addedDate:"2026-09-17T00:00:00.000Z" },
   { id:"317", title:"Círculos de Chuva", author:"Raphael Draccon", fileType:"epub", filePath:"https://mvin2006.github.io/LIVROS/Drag%C3%B5es%20de%20%C3%89ter/03%20-%20C%C3%ADrculos%20de%20Chuva.epub", coverPath:"https://mvin2006.github.io/LIVROS/Drag%C3%B5es%20de%20%C3%89ter/03%20-%20C%C3%ADrculos%20de%20Chuva.webp", collectionId:"Dragões de Éter", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"318", title:"Okaa-san Itadakimasu w", author:"Mosquito Men", fileType:"pdf", filePath:"https://mvin2006.github.io/HQ/Mosquito%20Men/Okaa-san%20Itadakimasu%20w.pdf", coverPath:"https://mvin2006.github.io/HQ/Mosquito%20Men/Okaa-san%20Itadakimasu%20w.png", collectionId:"Mosquito Men", addedDate:"2026-10-09T00:00:00.000Z" },
 
 
 
