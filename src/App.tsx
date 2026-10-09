@@ -473,6 +473,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
 { id:"303", title:"Sombra e Ossos", author:"Leigh Bardugo", fileType:"epub", filePath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/Trilogia%20Grisha/01%20-%20Sombra%20e%20Ossos.epub", coverPath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/Trilogia%20Grisha/01%20-%20Sombra%20e%20Ossos.webp", collectionId:"Trilogia Grisha", addedDate:"2026-09-17T00:00:00.000Z" },
 { id:"304", title:"Sol e Tormenta", author:"Leigh Bardugo", fileType:"epub", filePath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/Trilogia%20Grisha/02%20-%20Sol%20e%20Tormenta.epub", coverPath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/Trilogia%20Grisha/02%20-%20Sol%20e%20Tormenta.webp", collectionId:"Trilogia Grisha", addedDate:"2026-09-17T00:00:00.000Z" },
 { id:"305", title:"Ruína e Ascensão", author:"Leigh Bardugo", fileType:"epub", filePath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/Trilogia%20Grisha/03%20-%20%20Ru%C3%ADna%20e%20Ascens%C3%A3o.epub", coverPath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/Trilogia%20Grisha/03%20-%20%20Ru%C3%ADna%20e%20Ascens%C3%A3o.webp", collectionId:"Trilogia Grisha", addedDate:"2026-09-17T00:00:00.000Z" },
+  { id:"328", title:"Oba Gui", author:"Mosquito Men", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Mosquito%20Men/Oba%20Gui.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Mosquito%20Men/Oba%20Gui.jpg", collectionId:"Mosquito Men", addedDate:"2026-10-09T00:00:00.000Z" },
 
 ];
 
