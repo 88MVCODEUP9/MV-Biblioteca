@@ -90,6 +90,8 @@ export interface ReaderShellProps {
   /** Tamanho real da página — usado no "ajustar à tela". */
   pageWidth: number;
   pageHeight: number;
+  /** Exibe páginas de PDF em sequência vertical e navega pela rolagem. */
+  continuousScroll?: boolean;
 
   onDownload?: () => void;
 
@@ -149,6 +151,7 @@ export function ReaderShell({
   onNext,
   pageWidth,
   pageHeight,
+  continuousScroll = false,
   onDownload,
   headerExtras,
   panel,
@@ -168,6 +171,7 @@ export function ReaderShell({
 
   const [rotation, setRotation] = useState(0);
   const [showZoomMenu, setShowZoomMenu] = useState(false);
+  const [continuousPage, setContinuousPage] = useState(pageNumber ?? 1);
 
   const ready = !loading && !error;
 
@@ -191,6 +195,25 @@ export function ReaderShell({
 
   const { isFullscreen, toggleFullscreen } = useFullscreen(rootRef);
 
+  const scrollToContinuousPage = useCallback((page: number) => {
+    const container = contentRef.current;
+    const target = container?.querySelector<HTMLElement>(`[data-reader-page="${page}"]`);
+    if (!container || !target) return;
+
+    const top = container.scrollTop + target.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    container.scrollTo({ top, behavior: 'smooth' });
+  }, []);
+
+  const navigatePrevious = useCallback(() => {
+    if (continuousScroll) scrollToContinuousPage(Math.max(continuousPage - 1, 1));
+    else onPrev();
+  }, [continuousPage, continuousScroll, onPrev, scrollToContinuousPage]);
+
+  const navigateNext = useCallback(() => {
+    if (continuousScroll) scrollToContinuousPage(Math.min(continuousPage + 1, numPages ?? continuousPage));
+    else onNext();
+  }, [continuousPage, continuousScroll, numPages, onNext, scrollToContinuousPage]);
+
   /* ─────────────────────────────────────────────────────────────────────────
      Zoom sem "pular": guarda o ponto central visível e o devolve ao centro
      depois de cada mudança de escala (senão a página ampliada vai para o canto).
@@ -200,6 +223,7 @@ export function ReaderShell({
 
   // Última posição de rolagem escolhida pelo usuário (em pixels).
   const scrollMemory = useRef({ left: 0, top: 0 });
+  const continuousScrollInitialized = useRef(false);
 
   // Enquanto uma troca de página está em andamento (conteúdo novo carregando,
   // altura do conteúdo oscilando), o navegador "prende" o scrollTop e dispara
@@ -313,6 +337,17 @@ export function ReaderShell({
       if (scrollFrozen.current) return;
 
       readScrollPosition();
+      if (continuousScroll) {
+        const viewportCenter = element.getBoundingClientRect().top + element.clientHeight / 2;
+        const pages = Array.from(element.querySelectorAll<HTMLElement>('[data-reader-page]'));
+        const visiblePage = pages.reduce((closest, page) => {
+          const distance = Math.abs(page.getBoundingClientRect().top + page.offsetHeight / 2 - viewportCenter);
+          return distance < closest.distance
+            ? { page: Number(page.dataset.readerPage), distance }
+            : closest;
+        }, { page: 1, distance: Number.POSITIVE_INFINITY });
+        setContinuousPage(visiblePage.page);
+      }
     };
 
     element.addEventListener('scroll', remember, { passive: true });
@@ -321,7 +356,7 @@ export function ReaderShell({
       element.removeEventListener('scroll', remember);
       releaseScrollLock();
     };
-  }, [readScrollPosition, releaseScrollLock]);
+  }, [continuousScroll, readScrollPosition, releaseScrollLock]);
 
   // ZOOM / ROTAÇÃO: mantém o ponto central visível (comportamento original).
   useLayoutEffect(() => {
@@ -329,13 +364,21 @@ export function ReaderShell({
 
     if (!element) return;
 
+    if (continuousScroll && !continuousScrollInitialized.current) {
+      element.scrollLeft = 0;
+      element.scrollTop = 0;
+      continuousScrollInitialized.current = true;
+      readScrollPosition();
+      return;
+    }
+
     element.scrollLeft = centerRatio.current.x * element.scrollWidth - element.clientWidth / 2;
     element.scrollTop = centerRatio.current.y * element.scrollHeight - element.clientHeight / 2;
 
     // Atualiza a memória (em px) para a nova escala; senão a trava de troca de
     // página devolveria pixels da escala antiga.
     readScrollPosition();
-  }, [scale, readScrollPosition]);
+  }, [continuousScroll, scale, readScrollPosition]);
 
   // TROCA DE PÁGINA: NÃO recentraliza nem volta ao topo — preserva o scroll.
   // (A 1ª página, quando pageNumber sai de null, continua centralizada pelo
@@ -416,13 +459,13 @@ export function ReaderShell({
         case 'PageDown':
         case ' ':
           event.preventDefault();
-          onNext();
+          navigateNext();
           break;
 
         case 'ArrowLeft':
         case 'PageUp':
           event.preventDefault();
-          onPrev();
+          navigatePrevious();
           break;
 
         case '+':
@@ -471,8 +514,8 @@ export function ReaderShell({
     fitToScreen,
     onClose,
     onClosePanel,
-    onNext,
-    onPrev,
+    navigateNext,
+    navigatePrevious,
     onTogglePanel,
     panelOpen,
     rotate,
@@ -579,12 +622,12 @@ export function ReaderShell({
 
       // Deslizar na horizontal (só quando a página não está bem ampliada,
       // para não brigar com o arrastar da página).
-      if (Math.abs(dx) > 60 && Math.abs(dy) < 100 && scale <= 1.3) {
-        if (dx < 0) onNext();
-        else onPrev();
+      if (!continuousScroll && Math.abs(dx) > 60 && Math.abs(dy) < 100 && scale <= 1.3) {
+        if (dx < 0) navigateNext();
+        else navigatePrevious();
       }
     },
-    [fitToScreen, onNext, onPrev, scale, setManualZoom, wakeControls, zoomMode]
+    [continuousScroll, fitToScreen, navigateNext, navigatePrevious, scale, setManualZoom, wakeControls, zoomMode]
   );
 
   const handleTouchStart = (event: React.TouchEvent) => {
@@ -659,12 +702,13 @@ export function ReaderShell({
      Render
   ───────────────────────────────────────────────────────────────────────── */
 
-  const pageLabel = `${pageNumber ?? '—'} / ${numPages ?? '—'}`;
+  const displayPage = continuousScroll ? continuousPage : pageNumber;
+  const pageLabel = `${displayPage ?? '—'} / ${numPages ?? '—'}`;
 
   // Progresso de 0% (primeira página) a 100% (última página).
   const progress =
-    pageNumber && numPages && numPages > 1
-      ? clamp(((pageNumber - 1) / (numPages - 1)) * 100, 0, 100)
+    displayPage && numPages && numPages > 1
+      ? clamp(((displayPage - 1) / (numPages - 1)) * 100, 0, 100)
       : 0;
 
   return (
@@ -719,7 +763,7 @@ export function ReaderShell({
         <button
           type="button"
           onClick={onClose}
-          className={`${buttonClass} w-10 h-10 hover:text-red-400 hover:bg-red-400/10`}
+          className={buttonClass + ' w-10 h-10 hover:text-red-400 hover:bg-red-400/10'}
           aria-label="Fechar leitor"
           title="Fechar (Esc)"
         >
@@ -756,7 +800,7 @@ export function ReaderShell({
         {/* Ações: tela cheia · girar · baixar */}
 
         <div
-          className="
+          className={`
             flex
             items-center
             gap-0.5
@@ -766,14 +810,14 @@ export function ReaderShell({
             border
             border-[var(--border)]
             shrink-0
-          "
+          `}
           role="toolbar"
           aria-label="Ações do leitor"
         >
           <button
             type="button"
             onClick={() => void toggleFullscreen()}
-            className={`${buttonClass} w-9 h-9`}
+            className={buttonClass + ' w-9 h-9'}
             title={isFullscreen ? 'Sair da tela cheia (F)' : 'Tela cheia (F)'}
             aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
           >
@@ -787,7 +831,7 @@ export function ReaderShell({
           <button
             type="button"
             onClick={rotate}
-            className={`${buttonClass} w-9 h-9`}
+            className={buttonClass + ' w-9 h-9'}
             title="Girar página / orientação (R)"
             aria-label="Girar página"
           >
@@ -798,7 +842,7 @@ export function ReaderShell({
             <button
               type="button"
               onClick={onDownload}
-              className={`${buttonClass} w-9 h-9`}
+              className={buttonClass + ' w-9 h-9'}
               title={`Baixar ${formatLabel}`}
               aria-label={`Baixar ${formatLabel}`}
             >
@@ -842,13 +886,13 @@ export function ReaderShell({
         {/* Background */}
 
         <div
-          className="
+          className={`
             pointer-events-none
             fixed
             inset-0
             opacity-30
             bg-[radial-gradient(circle_at_center,rgba(255,255,255,.04),transparent_60%)]
-          "
+          `}
         />
 
         {/* Loading */}
@@ -1002,20 +1046,19 @@ export function ReaderShell({
         {/* Página */}
 
         <div
-          className="
+          className={`
             relative
             z-10
             flex
             min-h-full
             min-w-full
             w-max
-            items-center
-            justify-center
+            ${continuousScroll ? 'items-start justify-start' : 'items-center justify-center'}
             px-0
             sm:px-4
             py-3
             sm:py-6
-          "
+          `}
           style={{
             touchAction: scale > 1.25 ? 'pan-x pan-y' : 'pan-y',
           }}
@@ -1026,7 +1069,7 @@ export function ReaderShell({
             alcançáveis pela rolagem (sem cortar a esquerda). A escala é
             aplicada pelo próprio conteúdo (Page do PDF / ScaledStage do EPUB).
           */}
-          <div className="select-none">
+          <div className={continuousScroll ? 'w-full select-none' : 'select-none'}>
             {children({ scale, rotation })}
           </div>
         </div>
@@ -1037,8 +1080,8 @@ export function ReaderShell({
           <>
             <button
               type="button"
-              onClick={onPrev}
-              disabled={!canPrev}
+              onClick={navigatePrevious}
+              disabled={continuousScroll ? continuousPage <= 1 : !canPrev}
               className={`${sideButtonClass} left-0 justify-start pl-1 sm:pl-3`}
               title="Página anterior (←)"
               aria-label="Página anterior"
@@ -1048,8 +1091,8 @@ export function ReaderShell({
 
             <button
               type="button"
-              onClick={onNext}
-              disabled={!canNext}
+              onClick={navigateNext}
+              disabled={continuousScroll ? continuousPage >= (numPages ?? 0) : !canNext}
               className={`${sideButtonClass} right-0 justify-end pr-1 sm:pr-3`}
               title="Próxima página (→)"
               aria-label="Próxima página"
@@ -1098,7 +1141,7 @@ export function ReaderShell({
               <button
                 type="button"
                 onClick={onClosePanel}
-                className={`${buttonClass} w-8 h-8`}
+                className={buttonClass + ' w-8 h-8'}
                 aria-label={`Fechar ${panelTitle ?? 'painel'}`}
               >
                 <X className="w-4 h-4" />

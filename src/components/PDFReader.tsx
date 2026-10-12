@@ -60,6 +60,17 @@ export function PDFReader({
   coverUrl,
   onClose,
 }: PDFReaderProps) {
+  // HQs hospedadas no repositório HQ são lidas em fluxo contínuo, como um PDF.
+  // Mantém mangás e demais PDFs no modo de uma página por vez.
+  const continuousScroll = (() => {
+    try {
+      return decodeURIComponent(new URL(url).pathname)
+        .split('/')
+        .some((segment) => segment.toLowerCase() === 'hq');
+    } catch {
+      return false;
+    }
+  })();
   const [numPages, setNumPages] = useState(0);
   const [pageNumber, setPageNumber] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
@@ -115,6 +126,7 @@ export function PDFReader({
       pageWidth={pageSize.width}
       pageHeight={pageSize.height}
       onDownload={downloadPdf}
+      continuousScroll={continuousScroll}
     >
       {({ scale, rotation }) => {
         const devicePixelRatio = Math.max(
@@ -149,7 +161,7 @@ export function PDFReader({
             loading={null}
             error={null}
           >
-            {!isLoading && !error && numPages > 0 && (
+            {!isLoading && !error && numPages > 0 && !continuousScroll && (
               <div
                 className="relative select-none"
                 style={{
@@ -197,6 +209,41 @@ export function PDFReader({
                     );
                   }}
                 />
+              </div>
+            )}
+            {!isLoading && !error && numPages > 0 && continuousScroll && (
+              <div className="flex w-full flex-col items-center gap-2 py-2">
+                {Array.from({ length: numPages }, (_, index) => (
+                  <div
+                    key={index + 1}
+                    data-reader-page={index + 1}
+                    className="flex w-full justify-center"
+                  >
+                    <Page
+                      pageNumber={index + 1}
+                      scale={scale}
+                      rotate={rotation}
+                      devicePixelRatio={devicePixelRatio}
+                      renderTextLayer={false}
+                      renderAnnotationLayer={false}
+                      canvasBackground="white"
+                      className="overflow-hidden rounded-sm shadow-[0_12px_50px_rgba(0,0,0,.45)]"
+                      loading={null}
+                      onLoadSuccess={(page) => {
+                        if (index !== 0) return;
+                        setPageSize((current) =>
+                          current.width === page.originalWidth &&
+                          current.height === page.originalHeight
+                            ? current
+                            : {
+                                width: page.originalWidth,
+                                height: page.originalHeight,
+                              }
+                        );
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
             )}
           </Document>
