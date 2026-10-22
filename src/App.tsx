@@ -485,6 +485,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   { id:"334", title:"A Profecia das Sombras", author:"Rick Riordan", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/As%20Provações%20de%20Apolo/02%20-%20A%20Profecia%20das%20Sombras.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/As%20Provações%20de%20Apolo/02%20-%20A%20Profecia%20das%20Sombras.webp", collectionId:"As Provações de Apolo", addedDate:"2026-10-13T00:00:00.000Z" },
   { id:"335", title:"O Labirinto de Fogo", author:"Rick Riordan", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/As%20Provações%20de%20Apolo/03%20-%20O%20Labirinto%20de%20Fogo_.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/As%20Provações%20de%20Apolo/03%20-%20O%20Labirinto%20de%20Fogo_.webp", collectionId:"As Provações de Apolo", addedDate:"2026-10-13T00:00:00.000Z" },
   { id:"336", title:"A Tumba do Tirano", author:"Rick Riordan", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/As%20Provações%20de%20Apolo/04%20-%20A%20Tumba%20do%20Tirano.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/LIVROS/main/As%20Provações%20de%20Apolo/04%20-%20A%20Tumba%20do%20Tirano.webp", collectionId:"As Provações de Apolo", addedDate:"2026-10-13T00:00:00.000Z" },
+  { id:"337", title:"Seducao da Vizinhanca A Mae do Meu Amigo Parte Final", author:"Hyji", fileType:"pdf", filePath:"https://mvin2006.github.io/HQ/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.pdf", coverPath:"https://mvin2006.github.io/HQ/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.jpg", collectionId:"Hyji", subCollectionId:"Sedução da Vizinhança", addedDate:"2026-10-22T00:00:00.000Z" },
 
 ];
 
@@ -503,7 +504,6 @@ const MAX_RECENT = 8;
 const NAV_ITEMS = [
   { id: 'books', label: 'Livros', Icon: BookOpen },
   { id: 'collections', label: 'Coleções', Icon: FolderOpen },
-  { id:"337", title:"Seducao da Vizinhanca A Mae do Meu Amigo Parte Final", author:"Hyji", fileType:"pdf", filePath:"https://mvin2006.github.io/HQ/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.pdf", coverPath:"https://mvin2006.github.io/HQ/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.jpg", collectionId:"Hyji", subCollectionId:"Sedução da Vizinhança", addedDate:"2026-10-22T00:00:00.000Z" },
 ] as const;
 
 // ─── Storage / derived data ───────────────────────────────────────────────────
