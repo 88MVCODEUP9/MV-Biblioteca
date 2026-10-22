@@ -503,6 +503,7 @@ const MAX_RECENT = 8;
 const NAV_ITEMS = [
   { id: 'books', label: 'Livros', Icon: BookOpen },
   { id: 'collections', label: 'Coleções', Icon: FolderOpen },
+  { id:"337", title:"Seducao da Vizinhanca A Mae do Meu Amigo Parte Final", author:"Hyji", fileType:"pdf", filePath:"https://mvin2006.github.io/HQ/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.pdf", coverPath:"https://mvin2006.github.io/HQ/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.jpg", collectionId:"Hyji", subCollectionId:"Sedução da Vizinhança", addedDate:"2026-10-22T00:00:00.000Z" },
 ] as const;
 
 // ─── Storage / derived data ───────────────────────────────────────────────────
