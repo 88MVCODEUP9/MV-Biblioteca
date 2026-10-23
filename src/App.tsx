@@ -3638,6 +3638,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
     subCollectionId: "Sedução da Vizinhança",
     addedDate: "2026-10-22T00:00:00.000Z",
   },
+  { id:"338", title:"Seducao Da Vizinhanca Versao da Mae Parte 1", author:"z\\x", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-Da-Vizinhanca-Versao-da-Mae-Parte-1.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Hyji/Sedu%C3%A7%C3%A3o%20da%20Vizinhan%C3%A7a/Seducao-Da-Vizinhanca-Versao-da-Mae-Parte-1.jpg", collectionId:"Hyji", addedDate:"2026-10-23T00:00:00.000Z" },
 
 ];
 
