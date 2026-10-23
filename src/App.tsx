@@ -3627,19 +3627,9 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   // COLEÇÃO: Hyji
  // ═══════════════════════════════════════════════════════════════════════
 
+
 {
   id: "337",
-  title: "Seducao da Vizinhanca A Mae do Meu Amigo Parte Final",
-  author: "Hyji",
-  fileType: "pdf",
-  filePath: "https://raw.githubusercontent.com/Mvin2006/HQ/e85028b0fc8f16a7a4b1cbcda3f0c4470d37e8d5/Hyji/Sedução da Vizinhança/Seducao-Da-Vizinhanca-Versao-da-Mae-Parte-1.pdf",
-  coverPath: "https://raw.githubusercontent.com/Mvin2006/HQ/e85028b0fc8f16a7a4b1cbcda3f0c4470d37e8d5/Hyji/Sedução da Vizinhança/Seducao-Da-Vizinhanca-Versao-da-Mae-Parte-1.jpg",
-  collectionId: "Hyji",
-  subCollectionId: "Sedução da Vizinhança",
-  addedDate: "2026-10-22T00:00:00.000Z",
-},
-{
-  id: "338",
   title: "Seducao Da Vizinhanca Versao da Mae Parte 1",
   author: "Hyji",
   fileType: "pdf",
@@ -3650,7 +3640,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "339",
+  id: "338",
   title: "Seducao Da Vizinhanca Versao da Mae Parte 2",
   author: "Hyji",
   fileType: "pdf",
@@ -3661,7 +3651,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "340",
+  id: "339",
   title: "Seducao da Vizinhanca E Isso o Que Aconteceu Com a Mae Da Porta Ao Lado 2",
   author: "Hyji",
   fileType: "pdf",
@@ -3672,7 +3662,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "341",
+  id: "340",
   title: "Seducao da Vizinhanca E Isso o Que Aconteceu Com a Mae Da Porta Ao Lado 3",
   author: "Hyji",
   fileType: "pdf",
@@ -3683,7 +3673,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "342",
+  id: "341",
   title: "Seducao da Vizinhanca E Isso o Que Aconteceu Com a Mae Da Porta Ao Lado",
   author: "Hyji",
   fileType: "pdf",
@@ -3694,7 +3684,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "343",
+  id: "342",
   title: "Seducao da Vizinhanca Filho Fazendo Amor Com Sua Mae Atras de Seu Marido",
   author: "Hyji",
   fileType: "pdf",
@@ -3705,7 +3695,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "344",
+  id: "343",
   title: "Seducao da Vizinhanca Mae Drena O Desejo Sexual Transbordante de Seu Filho",
   author: "Hyji",
   fileType: "pdf",
@@ -3716,7 +3706,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "345",
+  id: "344",
   title: "Seducao da Vizinhanca Mae Fazendo Sexo Intenso com o Filho",
   author: "Hyji",
   fileType: "pdf",
@@ -3727,7 +3717,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   addedDate: "2026-10-23T00:00:00.000Z",
 },
 {
-  id: "346",
+  id: "345",
   title: "Seducao da Vizinhanca Recapitulacao Da Mae Do Meu Amigo",
   author: "Hyji",
   fileType: "pdf",
@@ -3736,6 +3726,18 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   collectionId: "Hyji",
   subCollectionId: "Sedução da Vizinhança",
   addedDate: "2026-10-23T00:00:00.000Z",
+},
+
+  {
+  id: "346",
+  title: "Seducao da Vizinhanca A Mae do Meu Amigo Parte Final",
+  author: "Hyji",
+  fileType: "pdf",
+  filePath: "https://raw.githubusercontent.com/Mvin2006/HQ/2c1869899d497904ab2858e2bb5d3112f4bf2490/Hyji/Sedução da Vizinhança/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.pdf",
+  coverPath: "https://raw.githubusercontent.com/Mvin2006/HQ/2c1869899d497904ab2858e2bb5d3112f4bf2490/Hyji/Sedução da Vizinhança/Seducao-da-Vizinhanca-A-Mae-do-Meu-Amigo-Parte-Final.jpg",
+  collectionId: "Hyji",
+  subCollectionId: "Sedução da Vizinhança",
+  addedDate: "2026-10-22T00:00:00.000Z",
 },
 {
   id: "347",
