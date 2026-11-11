@@ -3085,6 +3085,18 @@ const RAW_PRELOADED_BOOKS: Book[] = [
     addedDate: "2026-09-15T00:00:00.000Z",
   },
 
+  {
+    id: "351",
+    title: "Sinful Lust 16",
+    author: "Zetto",
+    fileType: "pdf",
+    filePath: "https://raw.githubusercontent.com/Mvin2006/HQ/main/Sinful%20Lust/Original/Sinful%20Lust%2016.pdf",
+    coverPath: "https://raw.githubusercontent.com/Mvin2006/HQ/main/Sinful%20Lust/Original/Sinful%20Lust%2016.jpg",
+    collectionId: "Sinful Lust",
+    subCollectionId: "Original",
+    addedDate: "2026-09-15T00:00:00.000Z",
+  },
+
   // ── Os Artifícios das Trevas ──────────────────────────────────────────
   {
     id: "288",
@@ -3783,7 +3795,6 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   subCollectionId: "Sedução da Vizinhança",
   addedDate: "2026-10-23T00:00:00.000Z",
 },
-  { id:"351", title:"Sinful Lust 16", author:"Zetto", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Sinful%20Lust/Original/Sinful%20Lust%2016.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Sinful%20Lust/Original/Sinful%20Lust%2016.jpg", collectionId:"Sinful Lust", addedDate:"2026-11-11T00:00:00.000Z" },
 
 
 ];
@@ -3825,7 +3836,13 @@ function loadInitialBooks(): Book[] {
   const parsedBooks = readStoredJson(STORAGE_KEY);
   const userBooks = Array.isArray(parsedBooks) ? parsedBooks.filter(isValidBook) : [];
   const preloadedIds = new Set(PRELOADED_BOOKS.map(book => book.id));
-  const extras = userBooks.filter(book => !preloadedIds.has(book.id));
+  // Evita chaves duplicadas na lista, inclusive em cadastros antigos do navegador.
+  const extraIds = new Set<string>();
+  const extras = userBooks.filter(book => {
+    if (preloadedIds.has(book.id) || extraIds.has(book.id)) return false;
+    extraIds.add(book.id);
+    return true;
+  });
 
   const hiddenRaw = readStoredJson(HIDDEN_PRELOADED_STORAGE_KEY);
   const hidden = new Set(
@@ -3837,7 +3854,7 @@ function loadInitialBooks(): Book[] {
 
 function loadRecentIds(): string[] {
   const raw = readStoredJson(RECENT_STORAGE_KEY);
-  return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string').slice(0, MAX_RECENT) : [];
+  return Array.isArray(raw) ? [...new Set(raw.filter((id): id is string => typeof id === 'string'))].slice(0, MAX_RECENT) : [];
 }
 
 function saveRecentIds(ids: string[]) {
@@ -3915,10 +3932,6 @@ const SORT_OPTIONS: { id: SortMode; label: string }[] = [
   { id: 'recent', label: 'Mais recentes' },
 ];
 
-// Marca que o popstate em andamento foi disparado pelo próprio app.
-let selfInitiatedBack = false;
-
-
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 function App() {
@@ -3938,33 +3951,23 @@ function App() {
   const [recentIds,         setRecentIds]          = useState<string[]>(loadRecentIds);
   const isReading = readingBook !== null;
 
-  // Botão/gesto "voltar" do navegador fecha só o leitor (e não o site inteiro).
-  // O popstate gerado pelo nosso próprio history.back() (ao fechar pelo botão
-  // do leitor) é ignorado — senão, no StrictMode, o leitor fechava sozinho.
+  // Abrir o leitor cria uma entrada de histórico; voltar fecha apenas o leitor.
+  // O fechamento explícito remove essa entrada sem criar listeners temporários.
   useEffect(() => {
     if (!isReading) return;
 
-    window.history.pushState({ mvReader: true }, '');
-
-    const handlePopState = () => {
-      if (selfInitiatedBack) return;
-      setReadingBook(null);
-    };
-
+    window.history.pushState({ ...window.history.state, mvReader: true }, '');
+    const handlePopState = () => setReadingBook(null);
     window.addEventListener('popstate', handlePopState);
 
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-
-      if ((window.history.state as { mvReader?: boolean } | null)?.mvReader) {
-        window.addEventListener('popstate', () => {
-          selfInitiatedBack = true;
-          window.setTimeout(() => { selfInitiatedBack = false; }, 0);
-        }, { once: true });
-        window.history.back();
-      }
-    };
+    return () => window.removeEventListener('popstate', handlePopState);
   }, [isReading]);
+
+  const closeReader = useCallback(() => {
+    if (window.history.state?.mvReader) window.history.back();
+    setReadingBook(null);
+  }, []);
+
   const [viewMode,           setViewMode]           = useState<'grid' | 'list'>('grid');
 
   // ── Collections ────────────────────────────────────────────────────────────
@@ -4007,12 +4010,13 @@ function App() {
 
   const openBook = useCallback((book: Book) => {
     setReadingBook(book);
-    setRecentIds(prev => {
-      const next = [book.id, ...prev.filter(id => id !== book.id)].slice(0, MAX_RECENT);
-      saveRecentIds(next);
-      return next;
-    });
+    setRecentIds(prev => [book.id, ...prev.filter(id => id !== book.id)].slice(0, MAX_RECENT));
   }, []);
+
+  // Persistência isolada das atualizações de estado (compatível com StrictMode).
+  useEffect(() => {
+    saveRecentIds(recentIds);
+  }, [recentIds]);
 
   useEffect(() => {
     document.title = readingBook
@@ -4046,7 +4050,7 @@ function App() {
   // ── Reader renderer ────────────────────────────────────────────────────────
   const renderReader = () => {
     if (!readingBook) return null;
-    const close = () => setReadingBook(null);
+    const close = closeReader;
     const Reader = readingBook.fileType === 'epub' ? EpubReader : PDFReader;
     return (
       <ReaderBoundary key={readingBook.id} onClose={close}>
