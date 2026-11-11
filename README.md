@@ -47,7 +47,7 @@ Este projeto já conta com validação para impedir que o array de coleções se
 ## Deploy no GitHub Pages
 
 1. Faça push do projeto para o repositório GitHub.
-2. Confirme que o arquivo [vite.config.ts](vite.config.ts) está com `base: '/MV_Biblioteca/'`.
+2. Confirme que o arquivo [vite.config.ts](vite.config.ts) está com `base: '/MV-Biblioteca/'`.
 3. Rode:
 
 ```bash
@@ -57,3 +57,13 @@ npm run build
 4. Publique o conteúdo da pasta `dist` conforme a estratégia escolhida no GitHub Pages.
 
 > O repositório foi deixado em estado pronto para ser enviado manualmente ao GitHub, sem quebrar na publicação.
+
+## Organização do código
+
+- `src/data/catalog.ts`: livros e coleções pré-carregados.
+- `src/lib/library.ts`: validação, busca, ordenação e coleções.
+- `src/lib/storage.ts`: leitura e gravação dos dados locais.
+- `src/App.tsx`: navegação e interface da biblioteca.
+- `src/components/reader/`: controles compartilhados pelos leitores PDF e EPUB.
+
+Para adicionar livros, edite o catálogo e execute `npm run ci` antes de publicar.

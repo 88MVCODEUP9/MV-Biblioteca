@@ -1,3 +1,4 @@
+import { isHttpUrl } from '../../lib/library';
 import {
   useCallback,
   useEffect,
@@ -225,6 +226,8 @@ export function useAutoHideControls({
  * (CORS), caímos no link direto.
  */
 export async function triggerDownload(url: string, filename: string) {
+  if (!isHttpUrl(url)) return;
+
   const safeName = filename.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'livro';
 
   const clickLink = (href: string, external: boolean) => {

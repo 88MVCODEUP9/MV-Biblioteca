@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
+import { LockKeyhole, LockKeyholeOpen, Minus, Plus } from 'lucide-react';
 
 /* ─────────────────────────────────────────────────────────────────────────
    ZoomBar — barra fina flutuante só da tela de leitura
@@ -21,6 +22,8 @@ import {
      apagada. Toque duplo na caixa = "ajustar à tela".
    - A barra é controlada: o zoom vive no usePageZoom; a posição vem do
      scroll real do <main> do leitor, então nada fica fora de sincronia.
+   - O leitor mantém a posição ao virar a página e mudar o zoom.
+     O cadeado impede novos ajustes até o usuário destravar.
 ────────────────────────────────────────────────────────────────────────── */
 
 export interface ZoomBarProps {
@@ -38,6 +41,14 @@ export interface ZoomBarProps {
   hidden?: boolean;
   /** Avisa o leitor que o usuário está mexendo (mantém os controles). */
   onActivity?: () => void;
+  /**
+   * Chamado ANTES de a caixa mover a página (arrastar ou setas): o leitor
+   * entende que a nova posição é escolha do usuário e a trava.
+   */
+  onPan?: () => void;
+  onPositionChange?: (position: number) => void;
+  positionLocked?: boolean;
+  onTogglePositionLock?: () => void;
 }
 
 const REPEAT_INTERVAL_MS = 100;
@@ -48,10 +59,11 @@ const KEY_STEP = 60;      // px — passo das setas do teclado
 const buttonClass = `
   flex-none flex items-center justify-center
   w-[34px] h-[34px] rounded-full
-  text-[var(--text-sub)] text-xl leading-none select-none
-  hover:text-[var(--gold)] hover:bg-[var(--gold-glow)]
-  active:scale-95 transition
-  disabled:opacity-30 disabled:pointer-events-none
+  border border-[#94a3b8] bg-[#263244] text-white text-xl leading-none select-none
+  hover:text-white hover:bg-[#35465d] hover:border-[#f5ce85]
+  active:scale-95 transition duration-200
+  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-2)]
+  disabled:opacity-50 disabled:pointer-events-none
 `;
 
 export function ZoomBar({
@@ -64,6 +76,10 @@ export function ZoomBar({
   maxZoom = 300,
   hidden = false,
   onActivity,
+  onPan,
+  onPositionChange,
+  positionLocked = false,
+  onTogglePositionLock,
 }: ZoomBarProps) {
   const trackRef = useRef<HTMLDivElement>(null);
 
@@ -151,11 +167,16 @@ export function ZoomBar({
 
   const scrollToPos = (next: number) => {
     const el = scrollRef.current;
-    if (!el) return;
-    el.scrollLeft = Math.min(1, Math.max(0, next)) * (el.scrollWidth - el.clientWidth);
+    if (!el || positionLocked) return;
+    const position = Math.min(1, Math.max(0, next));
+    onPan?.();
+    el.scrollLeft = position * Math.max(0, el.scrollWidth - el.clientWidth);
+    onPositionChange?.(position);
+    sync();
   };
 
   const handleThumbDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (positionLocked) return;
     event.preventDefault();
     event.stopPropagation();
     onActivity?.();
@@ -183,9 +204,10 @@ export function ZoomBar({
     const el = scrollRef.current;
     if (!el) return;
 
-    if (event.key === 'ArrowLeft') el.scrollLeft -= KEY_STEP;
-    else if (event.key === 'ArrowRight') el.scrollLeft += KEY_STEP;
-    else return;
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+
+    const max = el.scrollWidth - el.clientWidth;
+    if (max > 1) scrollToPos((el.scrollLeft + (event.key === 'ArrowLeft' ? -KEY_STEP : KEY_STEP)) / max);
 
     // As setas aqui rolam a página; não podem virar a página do livro.
     event.preventDefault();
@@ -212,7 +234,7 @@ export function ZoomBar({
         select-none transition-[opacity,transform] duration-500 ease-out
         ${isHidden
           ? 'opacity-0 translate-y-3 pointer-events-none'
-          : 'opacity-40 hover:opacity-100 active:opacity-100 focus-within:opacity-100'}
+          : 'opacity-100'}
       `}
     >
       <button
@@ -221,14 +243,31 @@ export function ZoomBar({
         aria-label="Diminuir zoom"
         title="Diminuir zoom (−)"
         disabled={zoom <= minZoom}
+        onClick={(event) => { if (event.detail === 0) onZoomOut(); }}
         onPointerDown={startRepeat(onZoomOut)}
         onPointerUp={stopRepeat}
         onPointerLeave={stopRepeat}
         onPointerCancel={stopRepeat}
       >
-        −
+        <Minus className="h-5 w-5" strokeWidth={2.8} aria-hidden="true" />
       </button>
 
+      {onTogglePositionLock && (
+        <button
+          type="button"
+          className={`${buttonClass} border ${positionLocked
+            ? '!border-[#ffe0a3] !bg-[#f5ce85] !text-[#211708] hover:!text-[#211708] hover:!bg-[#ffe0a3] shadow-[0_0_12px_rgba(245,206,133,0.3)]'
+            : '!border-[#94a3b8] !bg-[#263244] !text-white hover:!text-white hover:!bg-[#35465d]'}`}
+          aria-label={positionLocked ? 'Destravar posição' : 'Travar posição'}
+          title={positionLocked ? 'Posição travada · clique para ajustar' : 'Travar posição horizontal'}
+          aria-pressed={positionLocked}
+          onClick={onTogglePositionLock}
+        >
+          {positionLocked
+            ? <LockKeyhole className="h-[18px] w-[18px]" strokeWidth={2.2} aria-hidden="true" />
+            : <LockKeyholeOpen className="h-[18px] w-[18px]" strokeWidth={2.2} aria-hidden="true" />}
+        </button>
+      )}
       {/* Trilho */}
       <div
         ref={trackRef}
@@ -253,17 +292,18 @@ export function ZoomBar({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(pos * 100)}
-          aria-disabled={!scrollable}
+          aria-disabled={!scrollable || positionLocked}
+          aria-valuetext={scrollable ? `${positionLocked ? 'Travada' : 'Posição'} em ${Math.round(pos * 100)}%` : undefined}
           title={
             scrollable
-              ? 'Arraste para os lados · toque duplo ajusta à tela'
+              ? (positionLocked ? 'Destrave a posição para ajustar' : 'Arraste para ajustar e use o cadeado para travar')
               : 'Aumente o zoom para rolar para os lados'
           }
           onPointerDown={handleThumbDown}
           onPointerMove={handleThumbMove}
           onPointerUp={handleThumbUp}
           onPointerCancel={handleThumbUp}
-          onDoubleClick={onReset}
+          onDoubleClick={positionLocked ? undefined : onReset}
           onKeyDown={handleThumbKey}
           className={`
             absolute top-[2px] h-7 flex items-center justify-center
@@ -290,12 +330,13 @@ export function ZoomBar({
         aria-label="Aumentar zoom"
         title="Aumentar zoom (+)"
         disabled={zoom >= maxZoom}
+        onClick={(event) => { if (event.detail === 0) onZoomIn(); }}
         onPointerDown={startRepeat(onZoomIn)}
         onPointerUp={stopRepeat}
         onPointerLeave={stopRepeat}
         onPointerCancel={stopRepeat}
       >
-        +
+        <Plus className="h-5 w-5" strokeWidth={2.8} aria-hidden="true" />
       </button>
     </div>
   );

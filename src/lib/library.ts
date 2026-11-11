@@ -34,7 +34,7 @@ export function canonicalKey(value: string): string {
 export function isHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && !parsed.username && !parsed.password;
   } catch {
     return false;
   }
@@ -54,6 +54,9 @@ export function isValidBook(value: unknown): value is Book {
     typeof book.author === 'string' && book.author.trim().length > 0 &&
     (book.fileType === 'pdf' || book.fileType === 'epub') &&
     typeof book.filePath === 'string' && isHttpUrl(book.filePath) &&
+    (book.coverPath === undefined || (typeof book.coverPath === 'string' && isHttpUrl(book.coverPath))) &&
+    (book.collectionId === undefined || typeof book.collectionId === 'string') &&
+    (book.subCollectionId === undefined || typeof book.subCollectionId === 'string') &&
     typeof book.addedDate === 'string'
   );
 }

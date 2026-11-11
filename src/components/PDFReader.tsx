@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import type { ReaderShellHandle } from './reader/ReaderShell';
 
@@ -32,6 +32,61 @@ interface PDFReaderProps {
   author: string;
   coverUrl?: string;
   onClose: () => void;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LazyPageSlot — HQs / PDFs em rolagem contínua
+
+   Desenhar todas as páginas de uma vez trava o celular (um canvas por página).
+   Aqui só as páginas perto da tela são desenhadas; as demais ficam como um
+   espaço vazio do mesmo tamanho, então a barra de rolagem e a posição não
+   mudam. Páginas que saem de longe liberam a memória do canvas.
+───────────────────────────────────────────────────────────────────────────── */
+
+const RENDER_MARGIN = '150% 0px';
+
+function LazyPageSlot({
+  page,
+  width,
+  height,
+  children,
+}: {
+  page: number;
+  width: number;
+  height: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  // Sem IntersectionObserver (navegador muito antigo / testes): desenha tudo.
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined');
+
+  useEffect(() => {
+    const element = ref.current;
+
+    if (!element || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setNear(entry.isIntersecting),
+      { rootMargin: RENDER_MARGIN }
+    );
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={ref}
+      data-reader-page={page}
+      className="flex w-full justify-center"
+      // O espaço da página fica SEMPRE reservado: uma página que acabou de
+      // entrar e ainda não carregou tem altura 0, o que faria a HQ "pular".
+      style={{ minHeight: height, minWidth: width }}
+    >
+      {near ? children : null}
+    </div>
+  );
 }
 
 function describeLoadError(event: unknown): string {
@@ -82,6 +137,9 @@ export function PDFReader({
   });
 
   const shellRef = useRef<ReaderShellHandle>(null);
+
+  // Tamanho real das páginas que diferem do tamanho da 1ª (HQs podem misturar tamanhos).
+  const [measuredSizes, setMeasuredSizes] = useState<Record<number, { width: number; height: number }>>({});
 
   // Trava o scroll ANTES de trocar a página: o <Page> do react-pdf troca o
   // canvas por um placeholder durante o carregamento, o que faz o navegador
@@ -143,8 +201,29 @@ export function PDFReader({
         return (
           <Document
             file={url}
-            onLoadSuccess={({ numPages: total }) => {
+            onLoadSuccess={(pdf) => {
+              const total = pdf.numPages;
+
               setNumPages(total);
+
+              // HQ em rolagem contínua: só as páginas perto da tela são desenhadas,
+              // então o tamanho real vem direto do PDF (senão o "ajustar à tela"
+              // usaria um tamanho padrão e a página 1 abriria no lugar errado).
+              if (continuousScroll) {
+                void pdf
+                  .getPage(1)
+                  .then((first) => {
+                    const view = first.getViewport({ scale: 1 });
+
+                    setPageSize((current) =>
+                      current.width === view.width && current.height === view.height
+                        ? current
+                        : { width: view.width, height: view.height }
+                    );
+                  })
+                  .catch(() => {});
+              }
+
               // Não volta para a página 1 se o Document recarregar: mantém a atual.
               setPageNumber((current) => Math.min(Math.max(current, 1), total));
               setIsLoading(false);
@@ -212,38 +291,58 @@ export function PDFReader({
               </div>
             )}
             {!isLoading && !error && numPages > 0 && continuousScroll && (
-              <div className="flex w-full flex-col items-center gap-2 py-2">
-                {Array.from({ length: numPages }, (_, index) => (
-                  <div
-                    key={index + 1}
-                    data-reader-page={index + 1}
-                    className="flex w-full justify-center"
-                  >
-                    <Page
-                      pageNumber={index + 1}
-                      scale={scale}
-                      rotate={rotation}
-                      devicePixelRatio={devicePixelRatio}
-                      renderTextLayer={false}
-                      renderAnnotationLayer={false}
-                      canvasBackground="white"
-                      className="overflow-hidden rounded-sm shadow-[0_12px_50px_rgba(0,0,0,.45)]"
-                      loading={null}
-                      onLoadSuccess={(page) => {
-                        if (index !== 0) return;
-                        setPageSize((current) =>
-                          current.width === page.originalWidth &&
-                          current.height === page.originalHeight
-                            ? current
-                            : {
-                                width: page.originalWidth,
-                                height: page.originalHeight,
-                              }
-                        );
-                      }}
-                    />
-                  </div>
-                ))}
+              <div className="flex w-max min-w-full flex-col items-center gap-2 py-2">
+                {Array.from({ length: numPages }, (_, index) => {
+                  const number = index + 1;
+                  const known = measuredSizes[number] ?? pageSize;
+                  const swapped = rotation % 180 !== 0;
+
+                  return (
+                    <LazyPageSlot
+                      key={number}
+                      page={number}
+                      width={(swapped ? known.height : known.width) * scale}
+                      height={(swapped ? known.width : known.height) * scale}
+                    >
+                      <Page
+                        pageNumber={number}
+                        scale={scale}
+                        rotate={rotation}
+                        devicePixelRatio={devicePixelRatio}
+                        renderTextLayer={false}
+                        renderAnnotationLayer={false}
+                        canvasBackground="white"
+                        className="overflow-hidden rounded-sm shadow-[0_12px_50px_rgba(0,0,0,.45)]"
+                        loading={null}
+                        onLoadSuccess={(loaded) => {
+                          if (
+                            known.width !== loaded.originalWidth ||
+                            known.height !== loaded.originalHeight
+                          ) {
+                            setMeasuredSizes((current) => ({
+                              ...current,
+                              [number]: {
+                                width: loaded.originalWidth,
+                                height: loaded.originalHeight,
+                              },
+                            }));
+                          }
+
+                          if (index !== 0) return;
+                          setPageSize((current) =>
+                            current.width === loaded.originalWidth &&
+                            current.height === loaded.originalHeight
+                              ? current
+                              : {
+                                  width: loaded.originalWidth,
+                                  height: loaded.originalHeight,
+                                }
+                          );
+                        }}
+                      />
+                    </LazyPageSlot>
+                  );
+                })}
               </div>
             )}
           </Document>

@@ -47,6 +47,11 @@ import { MAX_ZOOM, MIN_ZOOM } from './ZoomBar';
    Cada formato só entrega o conteúdo da página (children) e a navegação.
 ───────────────────────────────────────────────────────────────────────────── */
 
+/** Quanto tempo (ms) um gesto do usuário continua valendo como "movimento dele". */
+const PAN_INTENT_MS = 350;
+/** Enquanto a página continua rolando por inércia, cada rolagem renova o gesto. */
+const PAN_CHAIN_MS = 160;
+
 export interface ReaderShellHandle {
   /** Mostra os controles de novo (ex.: atividade dentro do iframe do EPUB). */
   wake: () => void;
@@ -248,6 +253,66 @@ export function ReaderShell({
     };
   }, []);
 
+  /*
+   * POSIÇÃO HORIZONTAL TRAVADA
+   * ──────────────────────────
+   * A caixa do ZoomBar (e a roda / toque / barra de rolagem) escolhe a posição
+   * para os lados. Guardamos essa escolha como proporção (0 = esquerda,
+   * 1 = direita) e a devolvemos depois de QUALQUER mudança que não tenha
+   * partido do usuário: virar página, zoom, rotação, página nova carregando,
+   * foco do navegador… Só um novo gesto do usuário muda a posição.
+   */
+  const pinX = useRef(0.5);
+  const [positionLocked, setPositionLocked] = useState(false);
+  const positionLockedRef = useRef(false);
+  const panIntentUntil = useRef(0);
+  const pointerHeld = useRef(false);
+
+  const userIsPanning = useCallback(
+    () => !positionLockedRef.current && (pointerHeld.current || performance.now() < panIntentUntil.current),
+    []
+  );
+
+  const markPanIntent = useCallback((ms: number = PAN_INTENT_MS) => {
+    panIntentUntil.current = Math.max(panIntentUntil.current, performance.now() + ms);
+  }, []);
+
+  /** Guarda a posição atual como a escolhida pelo usuário. */
+  const pinFromElement = useCallback(() => {
+    const element = contentRef.current;
+
+    if (!element) return;
+
+    const max = element.scrollWidth - element.clientWidth;
+
+    // Sem nada para rolar a posição escolhida é preservada (não vira 0).
+    if (max <= 1) return;
+
+    pinX.current = Math.min(1, Math.max(0, element.scrollLeft / max));
+  }, []);
+
+  /** Devolve a página à posição travada. */
+  const applyPinX = useCallback(() => {
+    const element = contentRef.current;
+
+    if (!element) return;
+
+    const max = element.scrollWidth - element.clientWidth;
+
+    if (max <= 1) return;
+
+    const target = Math.round(pinX.current * max);
+
+    if (Math.abs(element.scrollLeft - target) > 1) element.scrollLeft = target;
+  }, []);
+
+  /** "Ajustar à tela": zera a trava (volta ao centro) e ajusta. */
+  const fitAndCenter = useCallback(() => {
+    if (!positionLockedRef.current) pinX.current = 0.5;
+    panIntentUntil.current = 0;
+    fitToScreen();
+  }, [fitToScreen]);
+
   const releaseScrollLock = useCallback(() => {
     if (unlockTimer.current !== null) {
       window.clearTimeout(unlockTimer.current);
@@ -283,18 +348,21 @@ export function ReaderShell({
 
     scrollFrozen.current = true;
 
-    const restore = () => {
-      const { left, top } = scrollMemory.current;
+    // Trocar de página nunca é um gesto de rolagem do usuário.
+    panIntentUntil.current = 0;
 
-      if (element.scrollLeft !== left) element.scrollLeft = left;
+    const restore = () => {
+      const { top } = scrollMemory.current;
+
+      applyPinX();
       if (element.scrollTop !== top) element.scrollTop = top;
     };
 
     restore();
+    // A cada chamada, de novo no próximo quadro (o conteúdo novo assenta depois).
+    window.requestAnimationFrame(restore);
 
     if (unlockTimer.current === null) {
-      window.requestAnimationFrame(restore);
-
       const userScroll = () => {
         releaseScrollLock();
         readScrollPosition();
@@ -326,37 +394,108 @@ export function ReaderShell({
       releaseScrollLock();
       readScrollPosition();
     }, 450);
-  }, [readScrollPosition, releaseScrollLock]);
+  }, [applyPinX, readScrollPosition, releaseScrollLock]);
 
   useEffect(() => {
     const element = contentRef.current;
 
     if (!element) return;
 
+    let frame = 0;
+
+    // Descobrir a página visível percorre todas as páginas: faz no máximo
+    // uma vez por quadro, senão HQs longas travam a rolagem.
+    const updateVisiblePage = () => {
+      frame = 0;
+
+      const viewportCenter = element.getBoundingClientRect().top + element.clientHeight / 2;
+      const pages = Array.from(element.querySelectorAll<HTMLElement>('[data-reader-page]'));
+      const visiblePage = pages.reduce((closest, page) => {
+        const distance = Math.abs(page.getBoundingClientRect().top + page.offsetHeight / 2 - viewportCenter);
+        return distance < closest.distance
+          ? { page: Number(page.dataset.readerPage), distance }
+          : closest;
+      }, { page: 1, distance: Number.POSITIVE_INFINITY });
+      setContinuousPage(visiblePage.page);
+    };
+
     const remember = () => {
-      if (scrollFrozen.current) return;
+      if (scrollFrozen.current) {
+        // Durante a troca de página o navegador "puxa" o scroll: desfaz.
+        if (!userIsPanning()) applyPinX();
+        return;
+      }
+
+      if (userIsPanning()) {
+        // Movimento do usuário: vira a nova posição travada (e a inércia
+        // do toque / da roda continua valendo como gesto dele).
+        markPanIntent(PAN_CHAIN_MS);
+        pinFromElement();
+      } else {
+        // Movimento que NÃO foi do usuário (layout, foco, navegador): desfaz.
+        applyPinX();
+      }
 
       readScrollPosition();
-      if (continuousScroll) {
-        const viewportCenter = element.getBoundingClientRect().top + element.clientHeight / 2;
-        const pages = Array.from(element.querySelectorAll<HTMLElement>('[data-reader-page]'));
-        const visiblePage = pages.reduce((closest, page) => {
-          const distance = Math.abs(page.getBoundingClientRect().top + page.offsetHeight / 2 - viewportCenter);
-          return distance < closest.distance
-            ? { page: Number(page.dataset.readerPage), distance }
-            : closest;
-        }, { page: 1, distance: Number.POSITIVE_INFINITY });
-        setContinuousPage(visiblePage.page);
+
+      if (continuousScroll && !frame) {
+        frame = window.requestAnimationFrame(updateVisiblePage);
       }
     };
 
+    const intent = () => markPanIntent();
+    const pressed = () => { pointerHeld.current = true; };
+    const released = () => { pointerHeld.current = false; };
+
+    // Só gestos de rolagem contam (a roda com Ctrl é zoom, não rolagem).
+    const wheelIntent = (event: WheelEvent) => {
+      if (!event.ctrlKey) intent();
+    };
+
     element.addEventListener('scroll', remember, { passive: true });
+    element.addEventListener('wheel', wheelIntent, { passive: true });
+    element.addEventListener('touchmove', intent, { passive: true });
+    element.addEventListener('pointerdown', pressed, { passive: true });
+    window.addEventListener('pointerup', released);
+    window.addEventListener('pointercancel', released);
 
     return () => {
       element.removeEventListener('scroll', remember);
+      element.removeEventListener('wheel', wheelIntent);
+      element.removeEventListener('touchmove', intent);
+      element.removeEventListener('pointerdown', pressed);
+      window.removeEventListener('pointerup', released);
+      window.removeEventListener('pointercancel', released);
+      if (frame) window.cancelAnimationFrame(frame);
+      pointerHeld.current = false;
       releaseScrollLock();
     };
-  }, [continuousScroll, readScrollPosition, releaseScrollLock]);
+  }, [
+    applyPinX,
+    continuousScroll,
+    markPanIntent,
+    pinFromElement,
+    readScrollPosition,
+    releaseScrollLock,
+    userIsPanning,
+  ]);
+
+  // Conteúdo que muda de tamanho sozinho (página nova, imagens, fontes do EPUB):
+  // a posição travada é reaplicada, a menos que o usuário esteja mexendo.
+  useEffect(() => {
+    const element = contentRef.current;
+
+    if (!element || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      if (!scrollFrozen.current && !userIsPanning()) applyPinX();
+    });
+
+    observer.observe(element);
+    Array.from(element.children).forEach((child) => observer.observe(child));
+
+    return () => observer.disconnect();
+  }, [applyPinX, pageNumber, scale, rotation, ready, userIsPanning]);
 
   // ZOOM / ROTAÇÃO: mantém o ponto central visível (comportamento original).
   useLayoutEffect(() => {
@@ -364,21 +503,29 @@ export function ReaderShell({
 
     if (!element) return;
 
+    // HQ: enquanto o leitor ainda está carregando não há páginas para medir;
+    // inicializar agora faria a 1ª mudança de zoom pular para o MEIO da HQ.
+    if (continuousScroll && !ready) return;
+
     if (continuousScroll && !continuousScrollInitialized.current) {
       element.scrollLeft = 0;
       element.scrollTop = 0;
       continuousScrollInitialized.current = true;
+      // HQ ampliada abre no começo (esquerda); sem excesso, fica centralizada.
+      pinX.current = element.scrollWidth - element.clientWidth > 1 ? 0 : 0.5;
       readScrollPosition();
       return;
     }
 
-    element.scrollLeft = centerRatio.current.x * element.scrollWidth - element.clientWidth / 2;
+    // Horizontal: devolve a posição TRAVADA (não recentraliza). Vertical: mantém
+    // o ponto central visível, como antes.
+    applyPinX();
     element.scrollTop = centerRatio.current.y * element.scrollHeight - element.clientHeight / 2;
 
     // Atualiza a memória (em px) para a nova escala; senão a trava de troca de
     // página devolveria pixels da escala antiga.
     readScrollPosition();
-  }, [continuousScroll, scale, readScrollPosition]);
+  }, [applyPinX, continuousScroll, ready, scale, readScrollPosition]);
 
   // TROCA DE PÁGINA: NÃO recentraliza nem volta ao topo — preserva o scroll.
   // (A 1ª página, quando pageNumber sai de null, continua centralizada pelo
@@ -427,11 +574,14 @@ export function ReaderShell({
 
   useEffect(() => {
     const handleKeyboard = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (event.defaultPrevented) return;
 
       if (
         target?.tagName === 'INPUT' ||
         target?.tagName === 'TEXTAREA' ||
+        target?.tagName === 'SELECT' ||
+        (event.key === ' ' && Boolean(target?.closest('button, a, [role="button"]'))) ||
         target?.isContentEditable
       ) {
         return;
@@ -482,7 +632,7 @@ export function ReaderShell({
 
         case '0':
           event.preventDefault();
-          fitToScreen();
+          fitAndCenter();
           break;
 
         case 'r':
@@ -511,7 +661,7 @@ export function ReaderShell({
 
     return () => document.removeEventListener('keydown', handleKeyboard);
   }, [
-    fitToScreen,
+    fitAndCenter,
     onClose,
     onClosePanel,
     navigateNext,
@@ -609,7 +759,7 @@ export function ReaderShell({
         if (now - lastTapTime.current < 300) {
           lastTapTime.current = 0;
 
-          if (zoomMode === 'manual') fitToScreen();
+          if (zoomMode === 'manual') fitAndCenter();
           else setManualZoom(scale * 1.5);
         } else {
           lastTapTime.current = now;
@@ -627,7 +777,7 @@ export function ReaderShell({
         else navigatePrevious();
       }
     },
-    [continuousScroll, fitToScreen, navigateNext, navigatePrevious, scale, setManualZoom, wakeControls, zoomMode]
+    [continuousScroll, fitAndCenter, navigateNext, navigatePrevious, scale, setManualZoom, wakeControls, zoomMode]
   );
 
   const handleTouchStart = (event: React.TouchEvent) => {
@@ -1069,7 +1219,8 @@ export function ReaderShell({
             alcançáveis pela rolagem (sem cortar a esquerda). A escala é
             aplicada pelo próprio conteúdo (Page do PDF / ScaledStage do EPUB).
           */}
-          <div className={continuousScroll ? 'w-full select-none' : 'select-none'}>
+          {/* HQ: a coluna cresce com o zoom (w-max) para a rolagem alcançar os DOIS lados. */}
+          <div className={continuousScroll ? 'w-max min-w-full select-none' : 'select-none'}>
             {children({ scale, rotation })}
           </div>
         </div>
@@ -1160,7 +1311,18 @@ export function ReaderShell({
           zoom={Math.round(scale * 100)}
           onZoomIn={zoomIn}
           onZoomOut={zoomOut}
-          onReset={fitToScreen}
+          onReset={fitAndCenter}
+          onPan={markPanIntent}
+          positionLocked={positionLocked}
+          onPositionChange={(position) => { pinX.current = position; }}
+          onTogglePositionLock={() => {
+            const locked = !positionLockedRef.current;
+            if (locked) pinFromElement();
+            positionLockedRef.current = locked;
+            panIntentUntil.current = 0;
+            setPositionLocked(locked);
+            wakeControls();
+          }}
           scrollRef={contentRef}
           minZoom={MIN_ZOOM}
           maxZoom={MAX_ZOOM}

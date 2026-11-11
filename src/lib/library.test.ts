@@ -44,6 +44,11 @@ describe('isValidBook', () => {
     ['sem título', { title: ' ' }],
     ['formato inválido', { fileType: 'mobi' }],
     ['url não http', { filePath: 'javascript:alert(1)' }],
+    ['credenciais na URL', { filePath: 'https://user:secret@example.com/a.pdf' }],
+    ['capa com script', { coverPath: 'javascript:alert(1)' }],
+    ['capa de tipo incorreto', { coverPath: 123 }],
+    ['coleção de tipo incorreto', { collectionId: {} }],
+    ['subcoleção de tipo incorreto', { subCollectionId: [] }],
   ])('rejeita livro %s', (_n, over) => {
     expect(isValidBook(book(over as Partial<Book>))).toBe(false);
   });

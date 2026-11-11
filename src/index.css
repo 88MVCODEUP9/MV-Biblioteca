@@ -17,7 +17,7 @@
   --gold: #d4b87a;
   --gold-light: #e8d5a4;
   --gold-bright: #f0e0b8;
-  --gold-dim: #9a7b4a;
+  --gold-dim: #bfa06c;
   --gold-dark: #6e5530;
 
   /* Gold glows — mais sutis e profundos */
@@ -29,7 +29,7 @@
   --text: #f0ede6;
   --text-bright: #faf8f2;
   --text-sub: #a89f94;
-  --text-muted: #625c54;
+  --text-muted: #a19a90;
 
   /* Bordas — refinadas */
   --border: rgba(212, 184, 122, 0.08);
@@ -73,7 +73,7 @@
     background: var(--bg);
     color: var(--text);
     font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
-    font-weight: 300;
+    font-weight: 400;
     min-height: 100vh;
     overflow-x: hidden;
     line-height: 1.6;
@@ -447,7 +447,7 @@ h1, h2, h3 {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 72px;
+  height: calc(72px + env(safe-area-inset-bottom, 0px));
   background: rgba(13, 13, 17, 0.92);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
@@ -900,4 +900,23 @@ h1, h2, h3 {
   font-size: 10px;
   background: var(--bg);
   padding: 0 12px;
+}
+
+/* Biblioteca: foco claro e movimentos discretos em todas as telas. */
+.book-card:focus-visible .cover-overlay {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .book-card:hover,
+  .card-hover:hover {
+    transform: translateY(-3px);
+  }
+}
+
+@media (hover: none) {
+  .book-card:hover,
+  .card-hover:hover {
+    transform: none;
+  }
 }

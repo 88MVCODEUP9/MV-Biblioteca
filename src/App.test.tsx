@@ -75,9 +75,9 @@ describe('App — estante', () => {
   it('troca entre grade e lista', async () => {
     const user = userEvent.setup();
     render(<App />);
-    expect(document.querySelector('.grid-cols-3')).not.toBeNull();
+    expect(document.querySelector('.grid-cols-2')).not.toBeNull();
     await user.click(screen.getByRole('button', { name: 'Mudar visualização' }));
-    expect(document.querySelector('.grid-cols-3')).toBeNull();
+    expect(document.querySelector('.grid-cols-2')).toBeNull();
   });
 });
 
@@ -98,7 +98,7 @@ describe('App — coleções', () => {
 });
 
 describe('App — leitor', () => {
-  it('abre o leitor, registra em "Continue de onde parou" e fecha', async () => {
+  it('abre o leitor, registra em "Abertos recentemente" e fecha', async () => {
     const user = userEvent.setup();
     render(<App />);
     expect(screen.queryByTestId('recent-shelf')).toBeNull();
@@ -123,6 +123,19 @@ describe('App — leitor', () => {
     });
   });
 
+  it('cria somente uma entrada de histórico ao abrir o leitor no StrictMode', async () => {
+    window.history.replaceState({}, '');
+    const push = vi.spyOn(window.history, 'pushState');
+    try {
+      const user = userEvent.setup();
+      render(<StrictMode><App /></StrictMode>);
+      await user.click(bookButtons()[0]);
+      expect(push).toHaveBeenCalledTimes(1);
+    } finally {
+      push.mockRestore();
+    }
+  });
+
   it('no StrictMode o leitor continua aberto (efeito do histórico não fecha sozinho)', async () => {
     const user = userEvent.setup();
     render(<StrictMode><App /></StrictMode>);
@@ -139,5 +152,33 @@ describe('App — leitor', () => {
     window.history.back();
     await vi.waitFor(() => expect(screen.queryByTestId('pdf-reader')).toBeNull());
     expect(bookButtons().length).toBeGreaterThan(300);
+  });
+});
+
+
+describe('App — navegação sem filtros presos', () => {
+  it('volta à raiz de coleções ao tocar na aba novamente', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const nav = within(screen.getByRole('navigation', { name: 'Principal' }));
+    await user.click(nav.getByRole('button', { name: /Coleções/ }));
+    await user.click(screen.getByText('Marvel'));
+    expect(screen.getByText('Guerras Secretas (1984)')).toBeInTheDocument();
+    await user.click(nav.getByRole('button', { name: /Coleções/ }));
+    expect(screen.getByText('Harry Potter')).toBeInTheDocument();
+    expect(screen.queryByText('Guerras Secretas (1984)')).toBeNull();
+  });
+
+  it('não leva busca e formato antigos para uma nova coleção', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.type(screen.getByLabelText('Buscar livros'), 'zzzxxx');
+    await user.click(screen.getByRole('button', { name: 'EPUB' }));
+    const nav = within(screen.getByRole('navigation', { name: 'Principal' }));
+    await user.click(nav.getByRole('button', { name: /Coleções/ }));
+    await user.click(screen.getByText('Marvel'));
+    await user.click(screen.getByText('Guerras Secretas (1984)'));
+    expect(bookButtons()).toHaveLength(12);
+    expect(screen.getByLabelText('Buscar livros')).toHaveValue('');
   });
 });

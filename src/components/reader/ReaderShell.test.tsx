@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { RefObject } from 'react';
 import { ReaderShell } from './ReaderShell';
 import { ScaledStage } from './ReaderShell';
@@ -94,6 +94,15 @@ describe('ReaderShell — zoom e rolagem horizontal', () => {
 
     expect(screen.getByRole('button', { name: /tela cheia/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /girar página/i })).toBeInTheDocument();
+  });
+
+  it('não vira página ao usar espaço em um botão do leitor', () => {
+    const onNext = vi.fn();
+    render(<ReaderShell {...defaultProps} onNext={onNext} />);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Travar posição' }), { key: ' ' });
+    expect(onNext).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: ' ' });
+    expect(onNext).toHaveBeenCalledOnce();
   });
 
   it('mostra título e autor no cabeçalho', () => {

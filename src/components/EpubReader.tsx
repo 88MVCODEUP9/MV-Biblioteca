@@ -388,6 +388,8 @@ export function EpubReader({
         const options = {
           width: PAGE_WIDTH,
           height: PAGE_HEIGHT,
+          allowScriptedContent: false,
+          allowPopups: false,
           spread: 'none',
           flow: 'paginated',
           gap: PAGE_GAP,
