@@ -3783,6 +3783,7 @@ const RAW_PRELOADED_BOOKS: Book[] = [
   subCollectionId: "Sedução da Vizinhança",
   addedDate: "2026-10-23T00:00:00.000Z",
 },
+  { id:"351", title:"Sinful Lust 16", author:"Zetto", fileType:"pdf", filePath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Sinful%20Lust/Original/Sinful%20Lust%2016.pdf", coverPath:"https://raw.githubusercontent.com/Mvin2006/HQ/main/Sinful%20Lust/Original/Sinful%20Lust%2016.jpg", collectionId:"Sinful Lust", addedDate:"2026-11-11T00:00:00.000Z" },
 
 
 ];
